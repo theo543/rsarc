@@ -3,5 +3,5 @@ name = "rsarc"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
+[dev-dependencies]
 fastrand = "2.3.0"
