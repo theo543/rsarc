@@ -40,7 +40,7 @@ pub fn newton_interpolation(y_values: &[GF64], x_values: &[GF64], poly: &mut [GF
     for i in 1..y_values.len() {
         multiply_by_x_plus_a(&mut basis_poly[..=i], x_values[i - 1]);
         update_divided_difference(div_diff, x_values, y_values[i], i);
-        add_poly_with_mul(poly, &basis_poly, div_diff[0]);
+        add_poly_with_mul(&mut poly[..=i], &basis_poly[..=i], div_diff[0]);
     }
 }
 
