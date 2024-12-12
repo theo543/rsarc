@@ -53,6 +53,7 @@ impl MulAssign for GF64 {
 
 impl GF64 {
     pub fn invert(self) -> GF64 {
+        assert_ne!(self, GF64(0));
         // Invert by raising to power 2^64 - 2 = 2^63 + 2^62 + ... + 2
         let mut result = self * self;
         let mut pow = result;
@@ -129,5 +130,11 @@ pub mod tests {
         let inverses = values.map(GF64::invert);
         let inv_prod = product(&inverses[1..]);
         assert_eq!(prod * inv_prod, values[0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn cannot_invert_zero() {
+        GF64(0).invert();
     }
 }
