@@ -44,10 +44,25 @@ impl ShareModeExt for OpenOptions {
     fn share_mode_lock(&mut self) -> &mut Self { self }
 }
 
+fn add_separators(mut value: usize) -> String {
+    let mut result = format!("{:03}", value % 1000);
+    value /= 1000;
+    while value >= 1000 {
+        result = format!("{:03}_{}", value % 1000, result);
+        value /= 1000;
+    }
+    format!("{}_{}", value, result)
+}
+
+fn print_sep(name: &str, value: usize) {
+    println!("{}{}", name, add_separators(value));
+}
+
 fn main() {
+    let start_time = std::time::Instant::now();
     {
         // generate test file
-        const TEST_FILE_SIZE: usize = 1024 * 10; // 10 KiB
+        const TEST_FILE_SIZE: usize = 1024 * 100; // 100 KiB
         const REPEATING_SEQUENCE: [u8; 32] = *b"\0\0\0 TEST FILE FOR RSARC ENCODER\n";
         let mut test_file = REPEATING_SEQUENCE.iter().cycle().take(TEST_FILE_SIZE).copied().collect::<Vec<_>>();
         for (mut i, chunk) in test_file.chunks_exact_mut(REPEATING_SEQUENCE.len()).enumerate() {
@@ -61,10 +76,17 @@ fn main() {
     }
     let input = OpenOptions::new().read(true).share_mode_lock().open("test.txt").unwrap();
     let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open("out.rsarc").unwrap();
-    const SIZE: usize = 104;
+    const SIZE: usize = 1040;
     encode(&input, &mut output, EncodeOptions {
         block_bytes: SIZE as usize,
         // TODO: Panics if set to 14 blocks with out-of-bounds in writer, figure out why. Incorrect output file size calculation?
         parity_blocks: 13,
     });
+
+    println!("Time: {:?}", start_time.elapsed());
+
+    print_sep("Inverses computed: ", gf64::INVERSES_COMPUTED.load(std::sync::atomic::Ordering::Relaxed));
+    print_sep("Multiplications performed as part of inversion: ", gf64::MULTIPLICATIONS_IN_INVERSION.load(std::sync::atomic::Ordering::Relaxed));
+    print_sep("Multiplications performed not as part of inversion: ", gf64::MULTIPLICATIONS_PERFORMED.load(std::sync::atomic::Ordering::Relaxed) - gf64::MULTIPLICATIONS_IN_INVERSION.load(std::sync::atomic::Ordering::Relaxed));
+    print_sep("Total multiplications performed: ", gf64::MULTIPLICATIONS_PERFORMED.load(std::sync::atomic::Ordering::Relaxed));
 }

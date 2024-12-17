@@ -1,5 +1,44 @@
+use std::cell::Cell;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign};
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub static MULTIPLICATIONS_PERFORMED: AtomicUsize = AtomicUsize::new(0);
+pub static MULTIPLICATIONS_IN_INVERSION: AtomicUsize = AtomicUsize::new(0);
+pub static INVERSES_COMPUTED: AtomicUsize = AtomicUsize::new(0);
+
+struct ThreadLocalCount {
+    count: Cell<usize>,
+    destination: &'static AtomicUsize,
+}
+
+impl ThreadLocalCount {
+    fn add(&self, value: usize) {
+        self.count.set(self.count.get() + value);
+    }
+    fn increment(&self) {
+        self.add(1);
+    }
+}
+
+impl Drop for ThreadLocalCount {
+    fn drop(&mut self) {
+        self.destination.fetch_add(self.count.get(), Ordering::Relaxed);
+    }
+}
+
+impl From<&'static AtomicUsize> for ThreadLocalCount {
+    fn from(destination: &'static AtomicUsize) -> Self {
+        ThreadLocalCount { count: Cell::new(0), destination }
+    }
+}
+
+// Temporary for testing, remove after optimizing division to reduce multiplications.
+thread_local! {
+    static MULTIPLICATIONS_PERFORMED_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&MULTIPLICATIONS_PERFORMED);
+    static MULTIPLICATIONS_IN_DIVISION_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&MULTIPLICATIONS_IN_INVERSION);
+    static INVERSES_COMPUTED_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&INVERSES_COMPUTED);
+}
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[repr(transparent)] // <- to allow safe conversion
@@ -35,6 +74,7 @@ impl Mul for GF64 {
     type Output = GF64;
 
     fn mul(self, GF64(mut rhs): Self) -> GF64 {
+        MULTIPLICATIONS_PERFORMED_LOCAL.with(|local| local.increment());
         let GF64(mut lhs) = self;
         let mut product: u64 = 0;
         for _ in 0..=63 {
@@ -63,6 +103,9 @@ impl MulAssign for GF64 {
 impl GF64 {
     pub fn invert(self) -> GF64 {
         assert_ne!(self, GF64(0));
+        INVERSES_COMPUTED_LOCAL.with(|local| local.increment());
+        // one multiplication for initializing result, 2 multiplications per 63 - 2 + 1 = 62 loop iterations
+        MULTIPLICATIONS_IN_DIVISION_LOCAL.with(|local| local.add(1 + 2 * 62));
         // Invert by raising to power 2^64 - 2 = 2^63 + 2^62 + ... + 2
         let mut result = self * self;
         let mut pow = result;

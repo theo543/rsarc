@@ -71,6 +71,7 @@ fn write_data(mapped: &mut [u8], recv_parity: Receiver<Option<(Buf, usize)>>, re
         stdout.flush().unwrap();
         i += 1;
         let Some((parity, code_index)) = recv_parity.recv().unwrap() else {
+            stdout.write(b"\n").unwrap();
             return;
         };
         assert!(parity.len() == parity_blocks);
