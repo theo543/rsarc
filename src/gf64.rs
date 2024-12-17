@@ -2,12 +2,21 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign};
 use std::fmt::Debug;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-pub(crate) struct GF64(pub u64);
+#[repr(transparent)] // <- to allow safe conversion
+pub struct GF64(pub u64);
 
 impl Debug for GF64 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:#064b}", self.0)
     }
+}
+
+pub fn u64_as_gf64(slice: &[u64]) -> &[GF64] {
+    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const GF64, slice.len()) }
+}
+
+pub fn u64_as_gf64_mut(slice: &mut [u64]) -> &mut [GF64] {
+    unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut GF64, slice.len()) }
 }
 
 // Prime polynomial for GF(2^64), x^64 term not included.
