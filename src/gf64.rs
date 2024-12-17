@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub static MULTIPLICATIONS_PERFORMED: AtomicUsize = AtomicUsize::new(0);
 pub static MULTIPLICATIONS_IN_INVERSION: AtomicUsize = AtomicUsize::new(0);
 pub static INVERSES_COMPUTED: AtomicUsize = AtomicUsize::new(0);
+pub static DIVISION_ITERATIONS: AtomicUsize = AtomicUsize::new(0);
+pub static EUCLIDEAN_ITERATIONS: AtomicUsize = AtomicUsize::new(0);
 
 struct ThreadLocalCount {
     count: Cell<usize>,
@@ -38,6 +40,8 @@ thread_local! {
     static MULTIPLICATIONS_PERFORMED_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&MULTIPLICATIONS_PERFORMED);
     static MULTIPLICATIONS_IN_DIVISION_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&MULTIPLICATIONS_IN_INVERSION);
     static INVERSES_COMPUTED_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&INVERSES_COMPUTED);
+    static DIVISION_ITERATIONS_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&DIVISION_ITERATIONS);
+    static EUCLIDEAN_ITERATIONS_LOCAL: ThreadLocalCount = ThreadLocalCount::from(&EUCLIDEAN_ITERATIONS);
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -65,37 +69,41 @@ const POLY: u64 = 16 + 8 + 2 + 1;
 impl Add for GF64 {
     type Output = GF64;
 
-    fn add(self, rhs: Self) -> GF64 {
+    fn add(self, rhs: GF64) -> GF64 {
         GF64(self.0 ^ rhs.0)
     }
+}
+
+
+fn mul_u64_in_gf64(mut lhs: u64, mut rhs: u64) -> u64 {
+    MULTIPLICATIONS_PERFORMED_LOCAL.with(|local| local.increment());
+    let mut product: u64 = 0;
+    for _ in 0..=63 {
+        if rhs & 1 == 1 { product ^= lhs; }
+        rhs >>= 1;
+        let carry = lhs >> 63;
+        lhs <<= 1;
+        if carry == 1 { lhs ^= POLY; }
+    }
+    product
 }
 
 impl Mul for GF64 {
     type Output = GF64;
 
-    fn mul(self, GF64(mut rhs): Self) -> GF64 {
-        MULTIPLICATIONS_PERFORMED_LOCAL.with(|local| local.increment());
-        let GF64(mut lhs) = self;
-        let mut product: u64 = 0;
-        for _ in 0..=63 {
-            if rhs & 1 == 1 { product ^= lhs; }
-            rhs >>= 1;
-            let carry = lhs >> 63;
-            lhs <<= 1;
-            if carry == 1 { lhs ^= POLY; }
-        }
-        GF64(product)
+    fn mul(self, rhs: GF64) -> GF64 {
+        GF64(mul_u64_in_gf64(self.0, rhs.0))
     }
 }
 
 impl AddAssign for GF64 {
-    fn add_assign(&mut self, rhs: Self) {
+    fn add_assign(&mut self, rhs: GF64) {
         *self = *self + rhs;
     }
 }
 
 impl MulAssign for GF64 {
-    fn mul_assign(&mut self, rhs: Self) {
+    fn mul_assign(&mut self, rhs: GF64) {
         *self = *self * rhs;
     }
 }
@@ -104,29 +112,53 @@ impl GF64 {
     pub fn invert(self) -> GF64 {
         assert_ne!(self, GF64(0));
         INVERSES_COMPUTED_LOCAL.with(|local| local.increment());
-        // one multiplication for initializing result, 2 multiplications per 63 - 2 + 1 = 62 loop iterations
-        MULTIPLICATIONS_IN_DIVISION_LOCAL.with(|local| local.add(1 + 2 * 62));
-        // Invert by raising to power 2^64 - 2 = 2^63 + 2^62 + ... + 2
-        let mut result = self * self;
-        let mut pow = result;
-        for _ in 2..=63 {
-            pow *= pow;
-            result *= pow;
+
+        // Invert using extended Euclidean algorithm.
+
+        if self.0 == 1 { return self; } // 1 would cause shift overflow.
+
+        let mut t: u64 = 0;
+        let mut new_t: u64 = 1;
+        let mut r: u64 = POLY;
+        let mut new_r: u64 = self.0;
+
+        // First iteration of division is a special case because x^64 doesn't fit in u64.
+        DIVISION_ITERATIONS_LOCAL.with(|local| local.increment());
+        let mut quotient: u64 = 0;
+        let mut remainder: u64 = r;
+        remainder ^= new_r << (new_r.leading_zeros() + 1);
+        quotient |= 1 << (new_r.leading_zeros() + 1);
+
+        while new_r != 0 {
+            EUCLIDEAN_ITERATIONS_LOCAL.with(|local| local.increment());
+            loop {
+                if new_r.leading_zeros() < remainder.leading_zeros() { break; }
+                DIVISION_ITERATIONS_LOCAL.with(|local| local.increment());
+                let degree_diff = new_r.leading_zeros() - remainder.leading_zeros();
+                remainder ^= new_r << degree_diff;
+                quotient |= 1 << degree_diff;
+            }
+            (r, new_r) = (new_r, remainder);
+            MULTIPLICATIONS_IN_DIVISION_LOCAL.with(|local| local.add(1));
+            (t, new_t) = (new_t, t ^ mul_u64_in_gf64(quotient, new_t));
+            quotient = 0;
+            remainder = r;
         }
-        result
+
+        GF64(t)
     }
 }
 
 impl Div for GF64 {
     type Output = GF64;
 
-    fn div(self, rhs: Self) -> Self::Output {
+    fn div(self, rhs: GF64) -> GF64 {
         self * rhs.invert()
     }
 }
 
 impl DivAssign for GF64 {
-    fn div_assign(&mut self, rhs: Self) {
+    fn div_assign(&mut self, rhs: GF64) {
         *self = *self / rhs;
     }
 }
@@ -172,6 +204,11 @@ pub mod tests {
         assert_eq!(a * a.invert(), GF64(1));
         assert_eq!(a * b * b.invert(), a);
         assert_eq!(a / b, a * b.invert());
+    }
+
+    #[test]
+    fn inverse_of_one_is_one() {
+        assert_eq!(GF64(1).invert(), GF64(1));
     }
 
     #[test]

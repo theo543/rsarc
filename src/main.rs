@@ -89,4 +89,6 @@ fn main() {
     print_sep("Multiplications performed as part of inversion: ", gf64::MULTIPLICATIONS_IN_INVERSION.load(std::sync::atomic::Ordering::Relaxed));
     print_sep("Multiplications performed not as part of inversion: ", gf64::MULTIPLICATIONS_PERFORMED.load(std::sync::atomic::Ordering::Relaxed) - gf64::MULTIPLICATIONS_IN_INVERSION.load(std::sync::atomic::Ordering::Relaxed));
     print_sep("Total multiplications performed: ", gf64::MULTIPLICATIONS_PERFORMED.load(std::sync::atomic::Ordering::Relaxed));
+    print_sep("Division iterations: ", gf64::DIVISION_ITERATIONS.load(std::sync::atomic::Ordering::Relaxed));
+    print_sep("Euclidean iterations: ", gf64::EUCLIDEAN_ITERATIONS.load(std::sync::atomic::Ordering::Relaxed));
 }
