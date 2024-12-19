@@ -59,6 +59,7 @@ fn print_sep(name: &str, value: usize) {
 }
 
 fn main() {
+    gf64::check_cpu_support_for_carryless_multiply();
     let start_time = std::time::Instant::now();
     {
         // generate test file

@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign};
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub static MULTIPLICATIONS_PERFORMED: AtomicUsize = AtomicUsize::new(0);
 pub static MULTIPLICATIONS_IN_INVERSION: AtomicUsize = AtomicUsize::new(0);
@@ -74,9 +74,24 @@ impl Add for GF64 {
     }
 }
 
+#[target_feature(enable = "pclmulqdq")]
+unsafe fn mul_u64_in_gf64_x86(lhs: u64, rhs: u64) -> u64 {
+    use std::arch::x86_64::{_mm_clmulepi64_si128 as carryless_multiply, _mm_cvtsi64_si128 as i64_to_m128, _mm_cvtsi128_si64 as get_lower_half};
 
-fn mul_u64_in_gf64(mut lhs: u64, mut rhs: u64) -> u64 {
-    MULTIPLICATIONS_PERFORMED_LOCAL.with(|local| local.increment());
+    let poly = i64_to_m128(POLY as i64);
+    // 128-bit product of lhs and rhs. The upper half needs to be reduced using the field polynomial.
+    let full_prod = carryless_multiply(i64_to_m128(lhs as i64), i64_to_m128(rhs as i64), 0);
+    // Multiply upper half by polynomial to attempt to reduce it into the lower half.
+    let almost_reduced = carryless_multiply(full_prod, poly, 1);
+    // Some bits could still be in the upper half. Reduce upper half again. Now it's guaranteed to be fully reduced (because the highest degree term besides x^64 is x^4).
+    let fully_reduced = carryless_multiply(almost_reduced, poly, 1);
+    // XOR together the three lower halves to get the final result.
+    (get_lower_half(fully_reduced) ^ get_lower_half(almost_reduced) ^ get_lower_half(full_prod)) as u64
+}
+
+#[cold]
+#[inline(never)]
+fn mul_u64_in_gf64_generic(mut lhs: u64, mut rhs: u64) -> u64 {
     let mut product: u64 = 0;
     for _ in 0..=63 {
         if rhs & 1 == 1 { product ^= lhs; }
@@ -86,6 +101,26 @@ fn mul_u64_in_gf64(mut lhs: u64, mut rhs: u64) -> u64 {
         if carry == 1 { lhs ^= POLY; }
     }
     product
+}
+
+// Global variable used to store whether the CPU supports the pclmulqdq instruction.
+// If compiling only for CPUs with this instruction, set this to true at compile time.
+// The compiler will then completely remove this variable, the check, and the mul_u64_in_gf64_generic function.
+static CPU_HAS_CARRYLESS_MULTIPLY: AtomicBool = AtomicBool::new(cfg!(target_feature = "pclmulqdq"));
+
+pub fn check_cpu_support_for_carryless_multiply() {
+    if is_x86_feature_detected!("pclmulqdq") {
+        CPU_HAS_CARRYLESS_MULTIPLY.store(true, Ordering::Relaxed);
+    }
+}
+
+fn mul_u64_in_gf64(lhs: u64, rhs: u64) -> u64 {
+    MULTIPLICATIONS_PERFORMED_LOCAL.with(|local| local.increment());
+    if CPU_HAS_CARRYLESS_MULTIPLY.load(Ordering::Relaxed) {
+        unsafe { mul_u64_in_gf64_x86(lhs, rhs) }
+    } else {
+        mul_u64_in_gf64_generic(lhs, rhs)
+    }
 }
 
 impl Mul for GF64 {
