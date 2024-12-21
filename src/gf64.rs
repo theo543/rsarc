@@ -104,14 +104,18 @@ fn mul_u64_in_gf64_generic(mut lhs: u64, mut rhs: u64) -> u64 {
     product
 }
 
-// Global variable used to store whether the CPU supports the pclmulqdq instruction.
-// If compiling only for CPUs with this instruction, set this to true at compile time.
-// The compiler will then completely remove this variable, the check, and the mul_u64_in_gf64_generic function.
+// Global variables used to store CPU support for pclmulqdq and lzcnt.
+// If compiling only for CPUs with these instructions, the variables are set to true at compile time.
+// The compiler will then completely remove the variables, checks, and non-optimized code paths.
 static CPU_HAS_CARRYLESS_MULTIPLY: AtomicBool = AtomicBool::new(cfg!(target_feature = "pclmulqdq"));
+static CPU_HAS_LZCNT: AtomicBool = AtomicBool::new(cfg!(target_feature = "lzcnt"));
 
 pub fn check_cpu_support_for_carryless_multiply() {
     if is_x86_feature_detected!("pclmulqdq") {
         CPU_HAS_CARRYLESS_MULTIPLY.store(true, Ordering::Relaxed);
+    }
+    if is_x86_feature_detected!("lzcnt") {
+        CPU_HAS_LZCNT.store(true, Ordering::Relaxed);
     }
 }
 
@@ -145,7 +149,8 @@ impl MulAssign for GF64 {
 }
 
 impl GF64 {
-    pub fn invert(self) -> GF64 {
+    #[inline(always)]
+    fn invert_base(self) -> GF64 {
         assert_ne!(self, GF64(0));
         INVERSES_COMPUTED_LOCAL.with(|local| local.increment());
 
@@ -182,6 +187,25 @@ impl GF64 {
         }
 
         GF64(t)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn invert_generic(self) -> GF64 {
+        self.invert_base()
+    }
+
+    #[target_feature(enable = "lzcnt")]
+    unsafe fn invert_lzcnt(self) -> GF64 {
+        self.invert_base()
+    }
+
+    pub fn invert(self) -> GF64 {
+        if CPU_HAS_LZCNT.load(Ordering::Relaxed) {
+            unsafe { self.invert_lzcnt() }
+        } else {
+            self.invert_generic()
+        }
     }
 }
 
