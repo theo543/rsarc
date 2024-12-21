@@ -52,7 +52,7 @@ fn process_codes(recv_data: Receiver<Option<(Buf, usize)>>, return_data_buf: Sen
         newton_interpolation(u64_as_gf64(&data), None, &mut poly, &mut memory);
         let _ = return_data_buf.send(data); // will fail after reader thread shut down
         for (x, y) in u64_as_gf64_mut(&mut parity_buf).iter_mut().enumerate() {
-            *y = evaluate_poly(&poly, GF64((data_blocks + x) as u64))
+            *y = evaluate_poly(&poly, GF64((data_blocks + x) as u64));
         }
         send_parity.send(Some((parity_buf, code_index))).unwrap();
     }
@@ -89,7 +89,7 @@ fn hash_blocks(mapped: &[u8], output: &mut [u8], block_bytes: usize) {
               "amount of blocks in input should match output");
     const { assert!(blake3::OUT_LEN == 32, "blake3 hash length is 32 bytes"); }
     let (exact_blocks, final_block) = mapped.split_at(mapped.len() - mapped.len() % block_bytes);
-    assert_eq!(exact_blocks.len() / block_bytes + (!final_block.is_empty() as usize), output.len() / 40,
+    assert_eq!(exact_blocks.len() / block_bytes + usize::from(!final_block.is_empty()), output.len() / 40,
               "amount of whole blocks plus final partial block (if there is one) should match output");
 
     let mut output_chunks = output.chunks_exact_mut(40);
@@ -133,7 +133,8 @@ fn format_header(opt: &EncodeOptions, data_blocks: usize, file_size: u64) -> Vec
 pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
     assert!(opt.block_bytes % 8 == 0, "block bytes must be divisible by 8");
     let metadata = input.metadata().unwrap();
-    let data_blocks = metadata.len().div_ceil(opt.block_bytes as u64) as usize;
+    let file_len_usize = usize::try_from(metadata.len()).unwrap_or_else(|_| panic!("file size must fit in {} bits", std::mem::size_of::<usize>() * 8));
+    let data_blocks = file_len_usize.div_ceil(opt.block_bytes);
     println!("{data_blocks} data blocks");
     let header = format_header(&opt, data_blocks, metadata.len());
     let header_bytes = header.len();

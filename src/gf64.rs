@@ -55,11 +55,11 @@ impl Debug for GF64 {
 }
 
 pub fn u64_as_gf64(slice: &[u64]) -> &[GF64] {
-    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const GF64, slice.len()) }
+    unsafe { std::slice::from_raw_parts(slice.as_ptr().cast::<GF64>(), slice.len()) }
 }
 
 pub fn u64_as_gf64_mut(slice: &mut [u64]) -> &mut [GF64] {
-    unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut GF64, slice.len()) }
+    unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<GF64>(), slice.len()) }
 }
 
 // Prime polynomial for GF(2^64), x^64 term not included.
@@ -69,6 +69,7 @@ const POLY: u64 = 16 + 8 + 2 + 1;
 impl Add for GF64 {
     type Output = GF64;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, rhs: GF64) -> GF64 {
         GF64(self.0 ^ rhs.0)
     }
@@ -187,6 +188,7 @@ impl GF64 {
 impl Div for GF64 {
     type Output = GF64;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: GF64) -> GF64 {
         self * rhs.invert()
     }

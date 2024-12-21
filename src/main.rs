@@ -1,3 +1,5 @@
+#![warn(clippy::all)]
+
 use std::{fs::OpenOptions, io::Write};
 
 mod gf64;
@@ -51,7 +53,7 @@ fn add_separators(mut value: usize) -> String {
         result = format!("{:03}_{}", value % 1000, result);
         value /= 1000;
     }
-    format!("{}_{}", value, result)
+    format!("{value}_{result}")
 }
 
 fn print_sep(name: &str, value: usize) {
@@ -64,13 +66,14 @@ fn main() {
     {
         // generate test file
         const TEST_FILE_SIZE: usize = 1024 * 100; // 100 KiB
-        const REPEATING_SEQUENCE: [u8; 32] = *b"\0\0\0 TEST FILE FOR RSARC ENCODER\n";
+        const REPEATING_SEQUENCE: [u8; 33] = *b"\0\0\0\0 TEST FILE FOR RSARC ENCODER\n";
         let mut test_file = REPEATING_SEQUENCE.iter().cycle().take(TEST_FILE_SIZE).copied().collect::<Vec<_>>();
         for (mut i, chunk) in test_file.chunks_exact_mut(REPEATING_SEQUENCE.len()).enumerate() {
-            for out in chunk.iter_mut().take(3).rev() {
+            for out in chunk.iter_mut().take(4).rev() {
                 *out = (i % 10) as u8 + b'0';
                 i /= 10;
             }
+            assert_eq!(i, 0);
         }
         let mut input = OpenOptions::new().read(true).write(true).truncate(true).create(true).open("test.txt").unwrap();
         input.write_all(&test_file).unwrap();
@@ -79,7 +82,7 @@ fn main() {
     let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open("out.rsarc").unwrap();
     const SIZE: usize = 1040;
     encode(&input, &mut output, EncodeOptions {
-        block_bytes: SIZE as usize,
+        block_bytes: SIZE,
         // TODO: Panics if set to 14 blocks with out-of-bounds in writer, figure out why. Incorrect output file size calculation?
         parity_blocks: 13,
     });
