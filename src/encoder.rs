@@ -71,7 +71,7 @@ fn write_data(mapped: &mut [u8], recv_parity: Receiver<Option<(Buf, usize)>>, re
         stdout.flush().unwrap();
         i += 1;
         let Some((parity, code_index)) = recv_parity.recv().unwrap() else {
-            stdout.write(b"\n").unwrap();
+            stdout.write_all(b"\n").unwrap();
             return;
         };
         assert!(parity.len() == parity_blocks);
@@ -143,7 +143,7 @@ pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
     let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
     let full_size_bytes = header_bytes + hashes_bytes + parity_blocks_bytes;
     output.set_len(full_size_bytes as u64).unwrap();
-    output.write(&header).unwrap();
+    output.write_all(&header).unwrap();
 
     // Safety:
     // Maps are of separate files, so no aliasing.
