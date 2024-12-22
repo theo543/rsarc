@@ -6,6 +6,7 @@ mod gf64;
 mod polynomials;
 mod encoder;
 
+use gf64::stat_getters::*;
 use encoder::{EncodeOptions, encode};
 
 /*
@@ -89,10 +90,10 @@ fn main() {
 
     println!("Time: {:?}", start_time.elapsed());
 
-    print_sep("Inverses computed: ", gf64::INVERSES_COMPUTED.load(std::sync::atomic::Ordering::Relaxed));
-    print_sep("Multiplications performed as part of inversion: ", gf64::MULTIPLICATIONS_IN_INVERSION.load(std::sync::atomic::Ordering::Relaxed));
-    print_sep("Multiplications performed not as part of inversion: ", gf64::MULTIPLICATIONS_PERFORMED.load(std::sync::atomic::Ordering::Relaxed) - gf64::MULTIPLICATIONS_IN_INVERSION.load(std::sync::atomic::Ordering::Relaxed));
-    print_sep("Total multiplications performed: ", gf64::MULTIPLICATIONS_PERFORMED.load(std::sync::atomic::Ordering::Relaxed));
-    print_sep("Division iterations: ", gf64::DIVISION_ITERATIONS.load(std::sync::atomic::Ordering::Relaxed));
-    print_sep("Euclidean iterations: ", gf64::EUCLIDEAN_ITERATIONS.load(std::sync::atomic::Ordering::Relaxed));
+    print_sep("Inverses computed: ", INVERSES_COMPUTED());
+    print_sep("Multiplications performed as part of inversion: ", MULTIPLICATIONS_IN_DIVISION());
+    print_sep("Multiplications performed not as part of inversion: ", MULTIPLICATIONS_PERFORMED() - MULTIPLICATIONS_IN_DIVISION());
+    print_sep("Total multiplications performed: ", MULTIPLICATIONS_PERFORMED());
+    print_sep("Division iterations: ", DIVISION_ITERATIONS());
+    print_sep("Euclidean iterations: ", EUCLIDEAN_ITERATIONS());
 }
