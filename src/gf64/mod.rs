@@ -3,8 +3,8 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod stats;
-pub use stats::stat_getters;
-use stats::{thread_locals::*, LocalKeyExt};
+pub use stats::print_stats;
+use stats::thread_locals::*;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[repr(transparent)] // <- to allow safe conversion
@@ -142,7 +142,7 @@ impl GF64 {
                 quotient |= 1 << degree_diff;
             }
             (r, new_r) = (new_r, remainder);
-            MULTIPLICATIONS_IN_DIVISION.increment();
+            MULTIPLICATIONS_IN_INVERSION.increment();
             (t, new_t) = (new_t, t ^ mul_u64_in_gf64(quotient, new_t));
             quotient = 0;
             remainder = r;

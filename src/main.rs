@@ -6,7 +6,6 @@ mod gf64;
 mod polynomials;
 mod encoder;
 
-use gf64::stat_getters::*;
 use encoder::{EncodeOptions, encode};
 
 /*
@@ -47,20 +46,6 @@ impl ShareModeExt for OpenOptions {
     fn share_mode_lock(&mut self) -> &mut Self { self }
 }
 
-fn add_separators(mut value: usize) -> String {
-    let mut result = format!("{:03}", value % 1000);
-    value /= 1000;
-    while value >= 1000 {
-        result = format!("{:03}_{}", value % 1000, result);
-        value /= 1000;
-    }
-    format!("{value}_{result}")
-}
-
-fn print_sep(name: &str, value: usize) {
-    println!("{}{}", name, add_separators(value));
-}
-
 fn main() {
     gf64::check_cpu_support_for_carryless_multiply();
     let start_time = std::time::Instant::now();
@@ -89,11 +74,5 @@ fn main() {
     });
 
     println!("Time: {:?}", start_time.elapsed());
-
-    print_sep("Inverses computed: ", INVERSES_COMPUTED());
-    print_sep("Multiplications performed as part of inversion: ", MULTIPLICATIONS_IN_DIVISION());
-    print_sep("Multiplications performed not as part of inversion: ", MULTIPLICATIONS_PERFORMED() - MULTIPLICATIONS_IN_DIVISION());
-    print_sep("Total multiplications performed: ", MULTIPLICATIONS_PERFORMED());
-    print_sep("Division iterations: ", DIVISION_ITERATIONS());
-    print_sep("Euclidean iterations: ", EUCLIDEAN_ITERATIONS());
+    gf64::print_stats();
 }
