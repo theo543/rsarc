@@ -51,7 +51,7 @@ fn main() {
     let start_time = std::time::Instant::now();
     {
         // generate test file
-        const TEST_FILE_SIZE: usize = 1024 * 100; // 100 KiB
+        const TEST_FILE_SIZE: usize = 1024;
         const REPEATING_SEQUENCE: [u8; 33] = *b"\0\0\0\0 TEST FILE FOR RSARC ENCODER\n";
         let mut test_file = REPEATING_SEQUENCE.iter().cycle().take(TEST_FILE_SIZE).copied().collect::<Vec<_>>();
         for (mut i, chunk) in test_file.chunks_exact_mut(REPEATING_SEQUENCE.len()).enumerate() {
@@ -66,11 +66,11 @@ fn main() {
     }
     let input = OpenOptions::new().read(true).share_mode_lock().open("test.txt").unwrap();
     let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open("out.rsarc").unwrap();
-    const SIZE: usize = 1040;
+    const SIZE: usize = 32;
     encode(&input, &mut output, EncodeOptions {
         block_bytes: SIZE,
         // TODO: Panics if set to 14 blocks with out-of-bounds in writer, figure out why. Incorrect output file size calculation?
-        parity_blocks: 13,
+        parity_blocks: 14,
     });
 
     println!("Time: {:?}", start_time.elapsed());
