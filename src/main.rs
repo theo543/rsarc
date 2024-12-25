@@ -69,7 +69,6 @@ fn main() {
     const SIZE: usize = 32;
     encode(&input, &mut output, EncodeOptions {
         block_bytes: SIZE,
-        // TODO: Panics if set to 14 blocks with out-of-bounds in writer, figure out why. Incorrect output file size calculation?
         parity_blocks: 14,
     });
 

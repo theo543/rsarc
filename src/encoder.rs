@@ -78,7 +78,7 @@ fn write_data(mapped: &mut [u8], recv_parity: Receiver<Option<(Buf, usize)>>, re
         let mut mapped_idx = code_index;
         for p in &parity {
             mapped[mapped_idx] = p.to_le();
-            mapped_idx += parity_blocks;
+            mapped_idx += block_size_in_u64;
         }
         let _ = return_parity_buf.send(parity); // will fail after processor thread shut down
     }
