@@ -154,8 +154,12 @@ pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
     let header_bytes = header.len();
     assert!(header_bytes % 8 == 0);
 
+    let mut metadata_hasher = blake3::Hasher::new();
+    metadata_hasher.update(&header[HEADER_STRING.len() + blake3::OUT_LEN..]);
+
     // 32 bytes per hash, and first u64 from each block
     let hashes_bytes = 40 * (data_blocks + opt.parity_blocks);
+    assert!(hashes_bytes % 8 == 0);
 
     let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
 
@@ -170,8 +174,9 @@ pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
     // TODO: Implement a check of mtime to error out if the file was modified during encoding.
     // The mtime check would be after UB has occurred, but this UB is unlikely to cause the check to pass incorrectly.
     let input_map = unsafe { MmapOptions::new().map(input).unwrap() };
-    let mut output_map = unsafe { MmapOptions::new().offset((header_bytes) as u64).map_mut(&*output).unwrap() };
-    let (hashes_map, parity_map) = output_map.split_at_mut(hashes_bytes);
+    let mut output_map = unsafe { MmapOptions::new().map_mut(&*output).unwrap() };
+    let (header_map, hash_parity_map) = output_map.split_at_mut(header_bytes);
+    let (hashes_map, parity_map) = hash_parity_map.split_at_mut(hashes_bytes);
     assert_eq!(hashes_map.len(), hashes_bytes);
     assert_eq!(parity_map.len(), parity_blocks_bytes);
 
@@ -199,7 +204,12 @@ pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
         s.spawn(|| hash_blocks(parity_map, parity_hashes, opt.block_bytes));
     });
 
+    let metadata_hash = metadata_hasher.update(hashes_map).finalize();
+    let metadata_hash_map = &mut header_map[HEADER_STRING.len()..HEADER_STRING.len() + blake3::OUT_LEN];
+    metadata_hash_map.copy_from_slice(metadata_hash.as_bytes());
+
     output_map.flush().unwrap();
+    drop(output_map);
     output.flush().unwrap();
 
 }
