@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Write;
-use std::sync::mpsc::{channel, Sender, Receiver};
+use crossbeam_channel::{unbounded as channel, Sender, Receiver};
 
 use memmap2::MmapOptions;
 
@@ -9,7 +9,7 @@ use crate::polynomials::{evaluate_poly, newton_interpolation};
 
 type Buf = Box<[u64]>;
 
-fn read_data(mapped: &[u8], recv_data_buffer: Receiver<Buf>, send_data: Sender<Option<(Buf, usize)>>, block_bytes: usize) {
+fn read_data(mapped: &[u8], recv_data_buffer: &Receiver<Buf>, send_data: &Sender<Option<(Buf, usize)>>, block_bytes: usize) {
     // Safety: u8 to u64 conversion is valid.
     let (mapped_prefix, mapped_u64, mapped_trailing) = unsafe { mapped.align_to::<u64>() };
     assert!(mapped_prefix.is_empty(), "mmap should be 8-byte aligned");
@@ -36,25 +36,21 @@ fn read_data(mapped: &[u8], recv_data_buffer: Receiver<Buf>, send_data: Sender<O
         }
         send_data.send(Some((buf, code_idx))).unwrap();
     }
-    send_data.send(None).unwrap();
 }
 
-fn process_codes(recv_data: Receiver<Option<(Buf, usize)>>, return_data_buf: Sender<Buf>, recv_parity_buf: Receiver<Buf>, send_parity: Sender<Option<(Buf, usize)>>,
+fn process_codes(recv_data: &Receiver<Option<(Buf, usize)>>, return_data_buf: &Sender<Buf>, recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
                  data_blocks: usize, parity_blocks: usize) {
 
     let mut poly = vec![GF64(0); data_blocks];
     let mut memory = vec![GF64(0); data_blocks * 2];
 
     loop {
-        let Some((data, code_index)) = recv_data.recv().unwrap() else {
-            send_parity.send(None).unwrap();
-            return;
-        };
+        let Some((data, code_index)) = recv_data.recv().unwrap() else { return; };
         assert_eq!(data.len(), data_blocks);
         let mut parity_buf = recv_parity_buf.recv().unwrap();
         assert_eq!(parity_buf.len(), parity_blocks);
         newton_interpolation(u64_as_gf64(&data), None, &mut poly, &mut memory);
-        let _ = return_data_buf.send(data); // will fail after reader thread shut down
+        return_data_buf.send(data).unwrap();
         for (x, y) in u64_as_gf64_mut(&mut parity_buf).iter_mut().enumerate() {
             *y = evaluate_poly(&poly, GF64((data_blocks + x) as u64));
         }
@@ -62,7 +58,7 @@ fn process_codes(recv_data: Receiver<Option<(Buf, usize)>>, return_data_buf: Sen
     }
 }
 
-fn write_data(mapped: &mut [u8], recv_parity: Receiver<Option<(Buf, usize)>>, return_parity_buf: Sender<Buf>, parity_blocks: usize, block_bytes: usize) {
+fn write_data(mapped: &mut [u8], recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &Sender<Buf>, parity_blocks: usize, block_bytes: usize) {
     assert_eq!(mapped.len(), block_bytes * parity_blocks);
 
     // Safety: u8 to u64 conversion is valid.
@@ -87,7 +83,7 @@ fn write_data(mapped: &mut [u8], recv_parity: Receiver<Option<(Buf, usize)>>, re
             mapped[mapped_idx] = p.to_le();
             mapped_idx += block_size_in_u64;
         }
-        let _ = return_parity_buf.send(parity); // will fail after processor thread shut down
+        return_parity_buf.send(parity).unwrap();
     }
 }
 
@@ -180,23 +176,45 @@ pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
     assert_eq!(hashes_map.len(), hashes_bytes);
     assert_eq!(parity_map.len(), parity_blocks_bytes);
 
-    std::thread::scope(|s| {
+    {
         // create channels
         let data = channel::<Option<(Buf, usize)>>();
         let return_data = channel::<Buf>();
         let parity = channel::<Option<(Buf, usize)>>();
         let return_parity = channel::<Buf>();
 
+        let cpus = num_cpus::get();
+
         // allocate buffers
-        for _ in 0..5 {
+        for _ in 0..cpus * 2 {
             return_data.0.send(vec![0; data_blocks].into_boxed_slice()).unwrap();
             return_parity.0.send(vec![0; opt.parity_blocks].into_boxed_slice()).unwrap();
         }
 
-        s.spawn(|| read_data(&input_map, return_data.1, data.0, opt.block_bytes));
-        s.spawn(|| process_codes(data.1, return_data.0, return_parity.1, parity.0, data_blocks, opt.parity_blocks));
-        s.spawn(|| write_data(parity_map, parity.1, return_parity.0, opt.parity_blocks, opt.block_bytes));
-    });
+        // spawn threads
+        std::thread::scope(|s| {
+            let reader = s.spawn(|| read_data(&input_map, &return_data.1, &data.0, opt.block_bytes));
+            let processor_threads = (0..cpus).map(|_| {
+                s.spawn(|| process_codes(&data.1, &return_data.0, &return_parity.1, &parity.0, data_blocks, opt.parity_blocks))
+            }).collect::<Vec<_>>();
+            let writer = s.spawn(|| write_data(parity_map, &parity.1, &return_parity.0, opt.parity_blocks, opt.block_bytes));
+
+            // wait for all data to be read
+            reader.join().unwrap();
+
+            // stop processor threads
+            for _ in 0..cpus {
+                data.0.send(None).unwrap();
+            }
+            for t in processor_threads {
+                t.join().unwrap();
+            }
+
+            // stop writer thread
+            parity.0.send(None).unwrap();
+            writer.join().unwrap();
+        });
+    }
 
     std::thread::scope(|s| {
         let (data_hashes, parity_hashes) = hashes_map.split_at_mut(40 * data_blocks);
