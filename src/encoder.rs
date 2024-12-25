@@ -12,8 +12,10 @@ type Buf = Box<[u64]>;
 fn read_data(mapped: &[u8], recv_data_buffer: Receiver<Buf>, send_data: Sender<Option<(Buf, usize)>>, block_bytes: usize) {
     // Safety: u8 to u64 conversion is valid.
     let (mapped_prefix, mapped_u64, mapped_trailing) = unsafe { mapped.align_to::<u64>() };
-    assert_eq!(mapped_prefix.len(), 0, "mmap should be 8-byte aligned");
+    assert!(mapped_prefix.is_empty(), "mmap should be 8-byte aligned");
+
     let block_size_in_u64 = block_bytes / 8;
+
     for code_idx in 0..block_size_in_u64 {
         let mut buf = recv_data_buffer.recv().unwrap();
         let mut buf_idx = 0;
@@ -39,8 +41,10 @@ fn read_data(mapped: &[u8], recv_data_buffer: Receiver<Buf>, send_data: Sender<O
 
 fn process_codes(recv_data: Receiver<Option<(Buf, usize)>>, return_data_buf: Sender<Buf>, recv_parity_buf: Receiver<Buf>, send_parity: Sender<Option<(Buf, usize)>>,
                  data_blocks: usize, parity_blocks: usize) {
+
     let mut poly = vec![GF64(0); data_blocks];
     let mut memory = vec![GF64(0); data_blocks * 2];
+
     loop {
         let Some((data, code_index)) = recv_data.recv().unwrap() else {
             send_parity.send(None).unwrap();
@@ -59,10 +63,13 @@ fn process_codes(recv_data: Receiver<Option<(Buf, usize)>>, return_data_buf: Sen
 }
 
 fn write_data(mapped: &mut [u8], recv_parity: Receiver<Option<(Buf, usize)>>, return_parity_buf: Sender<Buf>, parity_blocks: usize, block_bytes: usize) {
+    assert_eq!(mapped.len(), block_bytes * parity_blocks);
+
     // Safety: u8 to u64 conversion is valid.
     let (mapped_prefix, mapped, mapped_trailing) = unsafe { mapped.align_to_mut::<u64>() };
-    assert_eq!(mapped_prefix.len(), 0, "mmap should be 8-byte aligned");
-    assert_eq!(mapped_trailing.len(), 0, "there should be no trailing bytes in output mmap");
+    assert!(mapped_prefix.is_empty(), "mmap should be 8-byte aligned");
+    assert!(mapped_trailing.is_empty(), "there should be no trailing bytes in output mmap");
+
     let block_size_in_u64 = block_bytes / 8;
     let mut i: u64 = 0;
     let mut stdout = std::io::stdout().lock();
@@ -87,21 +94,24 @@ fn write_data(mapped: &mut [u8], recv_parity: Receiver<Option<(Buf, usize)>>, re
 fn hash_blocks(mapped: &[u8], output: &mut [u8], block_bytes: usize) {
     assert_eq!(mapped.len().div_ceil(block_bytes), output.len() / 40,
               "amount of blocks in input should match output");
-    const { assert!(blake3::OUT_LEN == 32, "blake3 hash length is 32 bytes"); }
+
     let (exact_blocks, final_block) = mapped.split_at(mapped.len() - mapped.len() % block_bytes);
     assert_eq!(exact_blocks.len() / block_bytes + usize::from(!final_block.is_empty()), output.len() / 40,
               "amount of whole blocks plus final partial block (if there is one) should match output");
 
     let mut output_chunks = output.chunks_exact_mut(40);
+
     for (block, out) in exact_blocks.chunks_exact(block_bytes).zip(&mut output_chunks) {
         out[..8].copy_from_slice(&block[..8]);
         out[8..40].copy_from_slice(blake3::hash(block).as_bytes());
+        const { assert!(blake3::OUT_LEN == 32, "blake3 hash length is 32 bytes"); }
     }
 
     if final_block.is_empty() { return; }
 
-    // if there is a final partial block, there is one output chunk left in the iterator
-    let out = output_chunks.next().unwrap(); 
+    let out = output_chunks.next().expect("if there is a partial block, there should be one chunk left for it");
+    assert!(output_chunks.next().is_none(), "there shouldn't be any chunks left after the partial block");
+
     if final_block.len() >= 8 {
         // copy first 8 bytes of final block
         out[..8].copy_from_slice(&final_block[..8]);
@@ -123,6 +133,7 @@ const HEADER_STRING: [u8; 24] = *b"RSARC PARITY FILE\0\0\0\0\0\0\0";
 
 fn format_header(opt: &EncodeOptions, data_blocks: usize, file_size: u64) -> Vec<u8> {
     HEADER_STRING.into_iter()
+    .chain([0_u8].into_iter().cycle().take(blake3::OUT_LEN))
     .chain((opt.block_bytes as u64).to_le_bytes())
     .chain((data_blocks as u64).to_le_bytes())
     .chain((opt.parity_blocks as u64).to_le_bytes())
@@ -132,18 +143,23 @@ fn format_header(opt: &EncodeOptions, data_blocks: usize, file_size: u64) -> Vec
 
 pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
     assert!(opt.block_bytes % 8 == 0, "block bytes must be divisible by 8");
+
     let metadata = input.metadata().unwrap();
     let file_len_usize = usize::try_from(metadata.len()).unwrap_or_else(|_| panic!("file size must fit in {} bits", std::mem::size_of::<usize>() * 8));
+
     let data_blocks = file_len_usize.div_ceil(opt.block_bytes);
     println!("{data_blocks} data blocks");
+
     let header = format_header(&opt, data_blocks, metadata.len());
     let header_bytes = header.len();
     assert!(header_bytes % 8 == 0);
+
     // 32 bytes per hash, and first u64 from each block
     let hashes_bytes = 40 * (data_blocks + opt.parity_blocks);
+
     let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
-    let full_size_bytes = header_bytes + hashes_bytes + parity_blocks_bytes;
-    output.set_len(full_size_bytes as u64).unwrap();
+
+    output.set_len((header_bytes + hashes_bytes + parity_blocks_bytes) as u64).unwrap();
     output.write_all(&header).unwrap();
 
     // Safety:
@@ -156,18 +172,20 @@ pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
     let input_map = unsafe { MmapOptions::new().map(input).unwrap() };
     let mut output_map = unsafe { MmapOptions::new().offset((header_bytes) as u64).map_mut(&*output).unwrap() };
     let (hashes_map, parity_map) = output_map.split_at_mut(hashes_bytes);
+    assert_eq!(hashes_map.len(), hashes_bytes);
+    assert_eq!(parity_map.len(), parity_blocks_bytes);
 
     std::thread::scope(|s| {
-        // create channels and allocate buffers
+        // create channels
         let data = channel::<Option<(Buf, usize)>>();
         let return_data = channel::<Buf>();
         let parity = channel::<Option<(Buf, usize)>>();
         let return_parity = channel::<Buf>();
+
+        // allocate buffers
         for _ in 0..5 {
-            let data_buf = vec![0; data_blocks].into_boxed_slice();
-            let parity_buf = vec![0; opt.parity_blocks].into_boxed_slice();
-            return_data.0.send(data_buf).unwrap();
-            return_parity.0.send(parity_buf).unwrap();
+            return_data.0.send(vec![0; data_blocks].into_boxed_slice()).unwrap();
+            return_parity.0.send(vec![0; opt.parity_blocks].into_boxed_slice()).unwrap();
         }
 
         s.spawn(|| read_data(&input_map, return_data.1, data.0, opt.block_bytes));
