@@ -1,6 +1,6 @@
 #![warn(clippy::all)]
 
-use std::{fs::OpenOptions, io::Write};
+use std::fs::OpenOptions;
 
 mod gf64;
 mod polynomials;
@@ -46,32 +46,46 @@ impl ShareModeExt for OpenOptions {
     fn share_mode_lock(&mut self) -> &mut Self { self }
 }
 
+const TEST_FILE_NAME: &str = "test.txt";
+const OUTPUT_FILE_NAME: &str = "out.rsarc";
+const TEST_FILE_SIZE: usize = 1024 * 1024 * 10;
+const OPT: EncodeOptions = EncodeOptions {
+    block_bytes: 1024 * 100,
+    parity_blocks: 100,
+};
+
+fn gen_test_file() {
+    const TEXT: &[u8] = b" TEST FILE FOR RSARC ENCODER\n";
+    const DIGITS: usize = (TEST_FILE_SIZE / TEXT.len()).ilog10() as usize + 1;
+    const CHUNK_SIZE: usize = DIGITS + TEXT.len();
+    const TRAILING: usize = TEST_FILE_SIZE - TEST_FILE_SIZE % CHUNK_SIZE;
+
+    let test_file = OpenOptions::new().read(true).write(true).truncate(false).create(true).open(TEST_FILE_NAME).unwrap();
+    test_file.set_len(TEST_FILE_SIZE as u64).unwrap();
+    let mut test_file = unsafe { memmap2::MmapMut::map_mut(&test_file).unwrap() };
+    for (mut i, chunk) in test_file.chunks_exact_mut(CHUNK_SIZE).enumerate() {
+        for out in chunk.iter_mut().take(DIGITS).rev() {
+            *out = (i % 10) as u8 + b'0';
+            i /= 10;
+        }
+        assert_eq!(i, 0);
+        chunk[DIGITS..].copy_from_slice(TEXT);
+    }
+    test_file[TRAILING..].fill(b'\n');
+    test_file.flush().unwrap();
+}
+
 fn main() {
     gf64::check_cpu_support_for_carryless_multiply();
-    let start_time = std::time::Instant::now();
-    {
-        // generate test file
-        const TEST_FILE_SIZE: usize = 1024;
-        const REPEATING_SEQUENCE: [u8; 33] = *b"\0\0\0\0 TEST FILE FOR RSARC ENCODER\n";
-        let mut test_file = REPEATING_SEQUENCE.iter().cycle().take(TEST_FILE_SIZE).copied().collect::<Vec<_>>();
-        for (mut i, chunk) in test_file.chunks_exact_mut(REPEATING_SEQUENCE.len()).enumerate() {
-            for out in chunk.iter_mut().take(4).rev() {
-                *out = (i % 10) as u8 + b'0';
-                i /= 10;
-            }
-            assert_eq!(i, 0);
-        }
-        let mut input = OpenOptions::new().read(true).write(true).truncate(true).create(true).open("test.txt").unwrap();
-        input.write_all(&test_file).unwrap();
-    }
-    let input = OpenOptions::new().read(true).share_mode_lock().open("test.txt").unwrap();
-    let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open("out.rsarc").unwrap();
-    const SIZE: usize = 32;
-    encode(&input, &mut output, EncodeOptions {
-        block_bytes: SIZE,
-        parity_blocks: 14,
-    });
 
+    gen_test_file();
+
+    let input = OpenOptions::new().read(true).share_mode_lock().open(TEST_FILE_NAME).unwrap();
+    let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open(OUTPUT_FILE_NAME).unwrap();
+
+    let start_time = std::time::Instant::now();
+    encode(&input, &mut output, OPT);
     println!("Time: {:?}", start_time.elapsed());
+
     gf64::print_stats();
 }
