@@ -2,14 +2,17 @@ use std::fs::File;
 use std::io::Write;
 use crossbeam_channel::{unbounded as channel, Sender, Receiver};
 
+use indicatif::ProgressBar;
 use memmap2::MmapOptions;
 
 use crate::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
+use crate::make_multiprogress;
 use crate::polynomials::{evaluate_poly, newton_interpolation};
+use crate::progress::progress;
 
 type Buf = Box<[u64]>;
 
-fn read_data(mapped: &[u8], recv_data_buffer: &Receiver<Buf>, send_data: &Sender<Option<(Buf, usize)>>, block_bytes: usize) {
+fn read_data(mapped: &[u8], recv_data_buffer: &Receiver<Buf>, send_data: &Sender<Option<(Buf, usize)>>, block_bytes: usize, progress: &ProgressBar, single_progress: &ProgressBar) {
     // Safety: u8 to u64 conversion is valid.
     let (mapped_prefix, mapped_u64, mapped_trailing) = unsafe { mapped.align_to::<u64>() };
     assert!(mapped_prefix.is_empty(), "mmap should be 8-byte aligned");
@@ -20,10 +23,12 @@ fn read_data(mapped: &[u8], recv_data_buffer: &Receiver<Buf>, send_data: &Sender
         let mut buf = recv_data_buffer.recv().unwrap();
         let mut buf_idx = 0;
         let mut mapped_idx = code_idx;
+        single_progress.reset();
         while mapped_idx < mapped_u64.len() {
             buf[buf_idx] = mapped_u64[mapped_idx].to_le();
             buf_idx += 1;
             mapped_idx += block_size_in_u64;
+            single_progress.inc(1);
         }
         if buf_idx < buf.len() && mapped_idx == mapped_u64.len() {
             let mut last = [0_u8; 8];
@@ -35,11 +40,13 @@ fn read_data(mapped: &[u8], recv_data_buffer: &Receiver<Buf>, send_data: &Sender
             buf[buf_idx + 1..].fill(0);
         }
         send_data.send(Some((buf, code_idx))).unwrap();
+        progress.inc(1);
     }
 }
 
 fn process_codes(recv_data: &Receiver<Option<(Buf, usize)>>, return_data_buf: &Sender<Buf>, recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
-                 data_blocks: usize, parity_blocks: usize) {
+                 data_blocks: usize, parity_blocks: usize,
+                 progress: &ProgressBar) {
 
     let mut poly = vec![GF64(0); data_blocks];
     let mut memory = vec![GF64(0); data_blocks * 2];
@@ -55,10 +62,11 @@ fn process_codes(recv_data: &Receiver<Option<(Buf, usize)>>, return_data_buf: &S
             *y = evaluate_poly(&poly, GF64((data_blocks + x) as u64));
         }
         send_parity.send(Some((parity_buf, code_index))).unwrap();
+        progress.inc(1);
     }
 }
 
-fn write_data(mapped: &mut [u8], recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &Sender<Buf>, parity_blocks: usize, block_bytes: usize) {
+fn write_data(mapped: &mut [u8], recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &Sender<Buf>, parity_blocks: usize, block_bytes: usize, progress: &ProgressBar) {
     assert_eq!(mapped.len(), block_bytes * parity_blocks);
 
     // Safety: u8 to u64 conversion is valid.
@@ -67,16 +75,8 @@ fn write_data(mapped: &mut [u8], recv_parity: &Receiver<Option<(Buf, usize)>>, r
     assert!(mapped_trailing.is_empty(), "there should be no trailing bytes in output mmap");
 
     let block_size_in_u64 = block_bytes / 8;
-    let mut i: u64 = 0;
-    let mut stdout = std::io::stdout().lock();
     loop {
-        write!(stdout, "\x1b[100D\x1b[2K{} / {} = {}%", i, block_size_in_u64, (i as f64 / block_size_in_u64 as f64) * 100_f64).unwrap();
-        stdout.flush().unwrap();
-        i += 1;
-        let Some((parity, code_index)) = recv_parity.recv().unwrap() else {
-            stdout.write_all(b"\n").unwrap();
-            return;
-        };
+        let Some((parity, code_index)) = recv_parity.recv().unwrap() else { return; };
         assert!(parity.len() == parity_blocks);
         let mut mapped_idx = code_index;
         for p in &parity {
@@ -84,6 +84,7 @@ fn write_data(mapped: &mut [u8], recv_parity: &Receiver<Option<(Buf, usize)>>, r
             mapped_idx += block_size_in_u64;
         }
         return_parity_buf.send(parity).unwrap();
+        progress.inc(1);
     }
 }
 
@@ -191,13 +192,20 @@ pub fn encode(input: &File, output: &mut File, opt: EncodeOptions) {
             return_parity.0.send(vec![0; opt.parity_blocks].into_boxed_slice()).unwrap();
         }
 
+        let pb = |msg| progress(opt.block_bytes as u64, msg);
+        let single = progress(data_blocks as u64, "read single code");
+        let read = pb("read");
+        let process = pb("process");
+        let write = pb("write");
+        make_multiprogress!(single, read, process, write);
+
         // spawn threads
         std::thread::scope(|s| {
-            let reader = s.spawn(|| read_data(&input_map, &return_data.1, &data.0, opt.block_bytes));
+            let reader = s.spawn(|| read_data(&input_map, &return_data.1, &data.0, opt.block_bytes, &read, &single));
             let processor_threads = (0..cpus).map(|_| {
-                s.spawn(|| process_codes(&data.1, &return_data.0, &return_parity.1, &parity.0, data_blocks, opt.parity_blocks))
+                s.spawn(|| process_codes(&data.1, &return_data.0, &return_parity.1, &parity.0, data_blocks, opt.parity_blocks, &process))
             }).collect::<Vec<_>>();
-            let writer = s.spawn(|| write_data(parity_map, &parity.1, &return_parity.0, opt.parity_blocks, opt.block_bytes));
+            let writer = s.spawn(|| write_data(parity_map, &parity.1, &return_parity.0, opt.parity_blocks, opt.block_bytes, &write));
 
             // wait for all data to be read
             reader.join().unwrap();

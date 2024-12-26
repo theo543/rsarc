@@ -5,8 +5,10 @@ use std::{fs::OpenOptions, io::{self, BufWriter, Write}};
 mod gf64;
 mod polynomials;
 mod encoder;
+mod progress;
 
 use encoder::{EncodeOptions, encode};
+use progress::progress;
 
 /*
 Block = contiguous, contains one symbol from each RS code.
@@ -56,18 +58,19 @@ fn gen_test_file(file_size: u64) -> io::Result<()> {
     test_file.set_len(file_size)?;
     let mut test_file = BufWriter::new(test_file);
 
-    println!("Generating test data...");
-
+    let p = progress(file_size, "test file");
     let digits = (file_size / TEXT.len() as u64).ilog10() as usize + 1;
     let chunk_size = digits + TEXT.len();
     let chunks = file_size / chunk_size as u64;
     for i in 0..chunks {
         write!(test_file, "{i:0d$}{TEXT}", d = digits)?;
+        p.inc(chunk_size as u64);
     }
     test_file.write_all(&vec![b'\n'; (file_size % chunk_size as u64) as usize])?;
 
     let test_file = test_file.into_inner()?;
     test_file.sync_all()?;
+    p.finish_and_clear();
     Ok(())
 }
 

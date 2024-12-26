@@ -13,5 +13,6 @@ fastrand = "2.3.0"
 [dependencies]
 blake3 = "1.5.5"
 crossbeam-channel = "0.5.14"
+indicatif = { version = "0.17.9", default-features = false }
 memmap2 = "0.9.5"
 num_cpus = "1.16.0"
