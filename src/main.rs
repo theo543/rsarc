@@ -1,6 +1,6 @@
 #![warn(clippy::all)]
 
-use std::fs::OpenOptions;
+use std::{fs::OpenOptions, io::{self, BufWriter, Write}};
 
 mod gf64;
 mod polynomials;
@@ -48,43 +48,43 @@ impl ShareModeExt for OpenOptions {
 
 const TEST_FILE_NAME: &str = "test.txt";
 const OUTPUT_FILE_NAME: &str = "out.rsarc";
-const TEST_FILE_SIZE: usize = 1024 * 1024 * 10;
-const OPT: EncodeOptions = EncodeOptions {
-    block_bytes: 1024 * 100,
-    parity_blocks: 100,
-};
+const TEXT: &str = " TEST FILE FOR RSARC ENCODER\n";
 
-fn gen_test_file() {
-    const TEXT: &[u8] = b" TEST FILE FOR RSARC ENCODER\n";
-    const DIGITS: usize = (TEST_FILE_SIZE / TEXT.len()).ilog10() as usize + 1;
-    const CHUNK_SIZE: usize = DIGITS + TEXT.len();
-    const TRAILING: usize = TEST_FILE_SIZE - TEST_FILE_SIZE % CHUNK_SIZE;
+fn gen_test_file(file_size: u64) -> io::Result<()> {
+    if std::fs::metadata(TEST_FILE_NAME).map(|m| m.len() == file_size).unwrap_or(false) { return Ok(()); }
+    let test_file = OpenOptions::new().read(false).write(true).truncate(false).create(true).open(TEST_FILE_NAME)?;
+    test_file.set_len(file_size)?;
+    let mut test_file = BufWriter::new(test_file);
 
-    let test_file = OpenOptions::new().read(true).write(true).truncate(false).create(true).open(TEST_FILE_NAME).unwrap();
-    test_file.set_len(TEST_FILE_SIZE as u64).unwrap();
-    let mut test_file = unsafe { memmap2::MmapMut::map_mut(&test_file).unwrap() };
-    for (mut i, chunk) in test_file.chunks_exact_mut(CHUNK_SIZE).enumerate() {
-        for out in chunk.iter_mut().take(DIGITS).rev() {
-            *out = (i % 10) as u8 + b'0';
-            i /= 10;
-        }
-        assert_eq!(i, 0);
-        chunk[DIGITS..].copy_from_slice(TEXT);
+    println!("Generating test data...");
+
+    let digits = (file_size / TEXT.len() as u64).ilog10() as usize + 1;
+    let chunk_size = digits + TEXT.len();
+    let chunks = file_size / chunk_size as u64;
+    for i in 0..chunks {
+        write!(test_file, "{i:0d$}{TEXT}", d = digits)?;
     }
-    test_file[TRAILING..].fill(b'\n');
-    test_file.flush().unwrap();
+    test_file.write_all(&vec![b'\n'; (file_size % chunk_size as u64) as usize])?;
+
+    let test_file = test_file.into_inner()?;
+    test_file.sync_all()?;
+    Ok(())
 }
 
 fn main() {
     gf64::check_cpu_support_for_carryless_multiply();
 
-    gen_test_file();
+    let input_size = 1024 * 1024 * 10;
+    let block_bytes = 1024 * 100;
+    let parity_blocks = 100;
+
+    gen_test_file(input_size).expect("generating test file");
 
     let input = OpenOptions::new().read(true).share_mode_lock().open(TEST_FILE_NAME).unwrap();
     let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open(OUTPUT_FILE_NAME).unwrap();
 
     let start_time = std::time::Instant::now();
-    encode(&input, &mut output, OPT);
+    encode(&input, &mut output, EncodeOptions{block_bytes, parity_blocks});
     println!("Time: {:?}", start_time.elapsed());
 
     gf64::print_stats();
