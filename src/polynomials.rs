@@ -33,6 +33,14 @@ fn update_divided_difference_fixed_x_values(div_diff: &mut [GF64], y: GF64, i: u
 }
 
 pub fn newton_interpolation(y_values: &[GF64], x_values: Option<&[GF64]>, poly: &mut [GF64], memory: &mut [GF64]) {
+    if cfg!(feature="io_benchmark_no_interpolation") {
+        use std::hint::black_box;
+        black_box(y_values);
+        black_box(x_values);
+        black_box(&mut *poly);
+        black_box(&mut *memory);
+        if black_box(true) { return; }
+    }
     if let Some(x_values) = x_values { assert_eq!(y_values.len(), x_values.len()); }
     assert_eq!(y_values.len(), poly.len());
     assert!(memory.len() >= y_values.len() * 2);
