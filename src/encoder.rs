@@ -56,7 +56,7 @@ fn process_codes(recv_data: &Receiver<Option<(Buf, usize)>>, return_data_buf: &S
         assert_eq!(data.len(), data_blocks);
         let mut parity_buf = recv_parity_buf.recv().unwrap();
         assert_eq!(parity_buf.len(), parity_blocks);
-        newton_interpolation(u64_as_gf64(&data), None, &mut poly, &mut memory);
+        newton_interpolation(u64_as_gf64(&data), 0, 1, None, &mut poly, &mut memory);
         return_data_buf.send(data).unwrap();
         for (x, y) in u64_as_gf64_mut(&mut parity_buf).iter_mut().enumerate() {
             *y = evaluate_poly(&poly, GF64((data_blocks + x) as u64));

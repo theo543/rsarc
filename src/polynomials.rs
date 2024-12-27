@@ -32,7 +32,7 @@ fn update_divided_difference_fixed_x_values(div_diff: &mut [GF64], y: GF64, i: u
     }
 }
 
-pub fn newton_interpolation(y_values: &[GF64], x_values: Option<&[GF64]>, poly: &mut [GF64], memory: &mut [GF64]) {
+pub fn newton_interpolation(y_values: &[GF64], y_offset: usize, y_stride: usize, x_values: Option<&[GF64]>, poly: &mut [GF64], memory: &mut [GF64]) {
     if cfg!(feature="io_benchmark_no_interpolation") {
         use std::hint::black_box;
         black_box(y_values);
@@ -41,24 +41,27 @@ pub fn newton_interpolation(y_values: &[GF64], x_values: Option<&[GF64]>, poly: 
         black_box(&mut *memory);
         if black_box(true) { return; }
     }
-    if let Some(x_values) = x_values { assert_eq!(y_values.len(), x_values.len()); }
-    assert_eq!(y_values.len(), poly.len());
-    assert!(memory.len() >= y_values.len() * 2);
-    let (basis_poly, remaining_memory) = memory.split_at_mut(y_values.len());
-    let div_diff = &mut remaining_memory[..y_values.len()];
+    assert!(y_offset < y_stride);
+    assert_eq!(y_values.len() % y_stride, 0);
+    let y_values_len = y_values.len() / y_stride;
+    if let Some(x_values) = x_values { assert_eq!(y_values_len, x_values.len()); }
+    assert_eq!(y_values_len, poly.len());
+    assert!(memory.len() >= y_values_len * 2);
+    let (basis_poly, remaining_memory) = memory.split_at_mut(y_values_len);
+    let div_diff = &mut remaining_memory[..y_values_len];
     basis_poly[0] = GF64(1);
     basis_poly[1..].fill(GF64(0));
-    div_diff[0] = y_values[0];
+    div_diff[0] = y_values[y_offset];
     div_diff[1..].fill(GF64(0));
-    poly[0] = y_values[0];
+    poly[0] = y_values[y_offset];
     poly[1..].fill(GF64(0));
-    for i in 1..y_values.len() {
+    for i in 1..y_values_len {
         if let Some(x_values) = x_values {
             multiply_by_x_plus_a(&mut basis_poly[..=i], x_values[i - 1]);
-            update_divided_difference(div_diff, x_values, y_values[i], i);
+            update_divided_difference(div_diff, x_values, y_values[y_offset + i * y_stride], i);
         } else {
             multiply_by_x_plus_a(&mut basis_poly[..=i], GF64((i - 1) as u64));
-            update_divided_difference_fixed_x_values(div_diff, y_values[i], i);
+            update_divided_difference_fixed_x_values(div_diff, y_values[y_offset + i * y_stride], i);
         }
         add_poly_with_mul(&mut poly[..=i], &basis_poly[..=i], div_diff[0]);
     }
@@ -74,9 +77,9 @@ pub fn evaluate_poly(poly: &[GF64], x: GF64) -> GF64 {
 }
 
 #[cfg(test)]
-mod tests{
-    use crate::gf64::{tests::{gf64, gf64_array}, GF64};
-    use super::{evaluate_poly, newton_interpolation};
+mod tests {
+    use crate::gf64::tests::{gf64, gf64_array};
+    use super::{GF64, evaluate_poly, newton_interpolation};
 
     fn distinct_gf64_array<const N: usize>() -> [GF64; N] {
         loop {
@@ -114,10 +117,10 @@ mod tests{
     fn can_roundtrip_interpolate_eval() {
         // Fill memory with random data to check the function doesn't expect it to be zeroed.
         let mut memory = gf64_array::<100>();
-        let y_vals: [GF64; 50] = gf64_array();
-        let x_vals: [GF64; 50] = distinct_gf64_array();
+        let y_vals = gf64_array::<50>();
+        let x_vals = distinct_gf64_array::<50>();
         let mut poly = gf64_array::<50>();
-        newton_interpolation(&y_vals, Some(&x_vals), &mut poly, &mut memory);
+        newton_interpolation(&y_vals, 0, 1, Some(&x_vals), &mut poly, &mut memory);
         let roundtrip = x_vals.map(|x| evaluate_poly(&poly, x));
         assert_eq!(y_vals, roundtrip);
     }
@@ -125,9 +128,9 @@ mod tests{
     #[test]
     fn can_roundtrip_fixed_x_values() {
         let mut memory = gf64_array::<100>();
-        let y_vals: [GF64; 50] = gf64_array();
+        let y_vals = gf64_array::<50>();
         let mut poly = gf64_array::<50>();
-        newton_interpolation(&y_vals, None, &mut poly, &mut memory);
+        newton_interpolation(&y_vals, 0, 1, None, &mut poly, &mut memory);
         let x_values: [GF64; 50] = std::array::from_fn(|x| GF64(x as u64));
         let roundtrip = x_values.map(|x| evaluate_poly(&poly, x));
         assert_eq!(y_vals, roundtrip);
@@ -136,13 +139,13 @@ mod tests{
     #[test]
     fn can_recover_lost_data() {
         let mut memory = gf64_array::<100>();
-        let original_data: [GF64; 50] = gf64_array();
+        let original_data = gf64_array::<50>();
 
-        let mut all_x_values: [GF64; 100] = distinct_gf64_array();
+        let mut all_x_values = distinct_gf64_array::<100>();
         let original_x_values: [GF64; 50] = (&all_x_values[..50]).try_into().unwrap();
 
         let mut original_poly = [GF64(0); 50];
-        newton_interpolation(&original_data, Some(&original_x_values), &mut original_poly, &mut memory);
+        newton_interpolation(&original_data, 0, 1, Some(&original_x_values), &mut original_poly, &mut memory);
 
         let mut all_y_values = [GF64(0); 100];
         let (data, parity) = all_y_values.split_at_mut(50);
@@ -151,8 +154,14 @@ mod tests{
 
         shuffle_together(&mut all_x_values, &mut all_y_values);
 
+        let mut y_values_strided = gf64_array::<500>(); // 50 y values mixed with garbage, to test if stride and offset work
+        let offset = fastrand::usize(0..10);
+        for i in 0..50 {
+            y_values_strided[offset + i * 10] = all_y_values[i];
+        }
+
         let mut recovered_poly = [GF64(0); 50];
-        newton_interpolation(&all_y_values[..50], Some(&all_x_values[..50]), &mut recovered_poly, &mut memory);
+        newton_interpolation(&y_values_strided, offset, 10, Some(&all_x_values[..50]), &mut recovered_poly, &mut memory);
         let recovered_data = original_x_values.map(|x| evaluate_poly(&recovered_poly, x));
 
         assert_eq!(original_poly, recovered_poly);
@@ -162,6 +171,6 @@ mod tests{
     #[test]
     #[should_panic]
     fn insufficient_memory() {
-        newton_interpolation(&[GF64(0); 10], None, &mut [GF64(0); 10], &mut [GF64(0); 19]);
+        newton_interpolation(&[GF64(0); 10], 0, 1, None, &mut [GF64(0); 10], &mut [GF64(0); 19]);
     }
 }
