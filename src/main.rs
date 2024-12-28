@@ -77,17 +77,17 @@ fn gen_test_file(file_size: u64) -> io::Result<()> {
 fn main() {
     gf64::check_cpu_support_for_carryless_multiply();
 
-    let input_size = 1024 * 1024 * 10;
-    let block_bytes = 1024 * 100;
-    let parity_blocks = 100;
+    let input_size = 1024 * 1024 * 1024 * 15;
+    let block_bytes = 1024 * 1024 * 150;
+    let parity_blocks = 50;
 
     gen_test_file(input_size).expect("generating test file");
 
-    let input = OpenOptions::new().read(true).share_mode_lock().open(TEST_FILE_NAME).unwrap();
+    let mut input = OpenOptions::new().read(true).share_mode_lock().open(TEST_FILE_NAME).unwrap();
     let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open(OUTPUT_FILE_NAME).unwrap();
 
     let start_time = std::time::Instant::now();
-    encode(&input, &mut output, EncodeOptions{block_bytes, parity_blocks});
+    encode(&mut input, &mut output, EncodeOptions{block_bytes, parity_blocks});
     println!("Time: {:?}", start_time.elapsed());
 
     gf64::print_stats();

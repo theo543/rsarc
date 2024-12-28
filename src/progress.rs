@@ -1,7 +1,10 @@
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressFinish, ProgressStyle};
 
 pub fn progress(len: u64, msg: &'static str) -> ProgressBar {
-    ProgressBar::new(len).with_message(msg).with_style(ProgressStyle::with_template("ETA {eta_precise:<20} {pos:>10}/{len:<10} {msg:<10} [{per_sec}]").unwrap())
+    ProgressBar::new(len)
+    .with_message(msg)
+    .with_style(ProgressStyle::with_template("ETA {eta_precise:<20} {pos:>10}/{len:<10} {msg:<13} [{per_sec}]").unwrap())
+    .with_finish(ProgressFinish::Abandon)
 }
 
 #[macro_export]
