@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{Read, Seek, Write};
-use std::ops::Div;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use crossbeam_channel::{unbounded as channel, Sender, Receiver};
@@ -10,9 +9,8 @@ use memmap2::MmapOptions;
 use positioned_io::{RandomAccessFile, ReadAt};
 
 use crate::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
-use crate::make_multiprogress;
 use crate::polynomials::{evaluate_poly, newton_interpolation};
-use crate::progress::progress;
+use crate::progress::{progress_usize as progress, make_multiprogress};
 
 trait IntoU64Ext {
     fn as_u64(&self) -> u64;
@@ -249,12 +247,11 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
             return_parity.0.send(vec![0; opt.parity_blocks].into_boxed_slice()).unwrap();
         }
 
-        let single = progress(data_blocks.as_u64() * symbols_read_per_code.as_u64(), "one read pass");
-        let pb = |msg| progress(opt.block_bytes.as_u64() / 8, msg);
-        let read_prog = pb("read");
-        let process_prog = pb("process");
-        let write_prog = pb("write");
-        make_multiprogress!(single, read_prog, process_prog, write_prog);
+        let single = progress(data_blocks * symbols_read_per_code, "one read pass");
+        let read_prog = progress(block_symbols, "read");
+        let process_prog = progress(block_symbols, "process");
+        let write_prog = progress(block_symbols, "write");
+        make_multiprogress([&single, &read_prog, &process_prog, &write_prog]);
 
         // spawn threads
         std::thread::scope(|s| {
@@ -284,38 +281,38 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
 
     }
 
-    {
-        let (data_hashes, parity_hashes) = hashes_map.split_at_mut(40 * data_blocks);
-        let data_prog = progress(data_hashes.len().div(40).as_u64(), "hash data");
-        let par_prog = progress(parity_hashes.len().div(40).as_u64(), "hash parity");
-        make_multiprogress!(data_prog, par_prog);
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let mut buf = vec![0_u8; opt.block_bytes];
-                let last_block_rem = (file_len % opt.block_bytes.as_u64()) as usize;
-                input.seek(std::io::SeekFrom::Start(0)).unwrap();
-                let last_hash = data_hashes.len() / 40 - 1;
-                for (i, out) in data_hashes.chunks_exact_mut(40).enumerate() {
-                    if i == last_hash && last_block_rem != 0 {
-                        buf.fill(0);
-                        input.read_exact(&mut buf[0..last_block_rem]).unwrap();
-                    } else {
-                        input.read_exact(&mut buf).unwrap();
-                    }
-                    out[..8].copy_from_slice(&buf[..8]);
-                    out[8..40].copy_from_slice(blake3::hash(&buf).as_bytes());
-                    data_prog.inc(1);
+    let (data_hashes, parity_hashes) = hashes_map.split_at_mut(40 * data_blocks);
+    std::thread::scope(|s| {
+        let data_prog = progress(data_hashes.len() / 40, "hash data");
+        let par_prog = progress(parity_hashes.len() / 40, "hash parity");
+        make_multiprogress([&data_prog, &par_prog]);
+        s.spawn(|| {
+            let data_prog = data_prog;
+            let mut buf = vec![0_u8; opt.block_bytes];
+            let last_block_rem = (file_len % opt.block_bytes.as_u64()) as usize;
+            input.seek(std::io::SeekFrom::Start(0)).unwrap();
+            let last_hash = data_hashes.len() / 40 - 1;
+            for (i, out) in data_hashes.chunks_exact_mut(40).enumerate() {
+                if i == last_hash && last_block_rem != 0 {
+                    buf.fill(0);
+                    input.read_exact(&mut buf[0..last_block_rem]).unwrap();
+                } else {
+                    input.read_exact(&mut buf).unwrap();
                 }
-            });
-            s.spawn(|| {
-                for (block, out) in parity_map.chunks_exact(opt.block_bytes).zip(parity_hashes.chunks_exact_mut(40)) {
-                    out[..8].copy_from_slice(&block[..8]);
-                    out[8..40].copy_from_slice(blake3::hash(block).as_bytes());
-                    par_prog.inc(1);
-                }
-            });
+                out[..8].copy_from_slice(&buf[..8]);
+                out[8..40].copy_from_slice(blake3::hash(&buf).as_bytes());
+                data_prog.inc(1);
+            }
         });
-    }
+        s.spawn(|| {
+            let par_prog = par_prog;
+            for (block, out) in parity_map.chunks_exact(opt.block_bytes).zip(parity_hashes.chunks_exact_mut(40)) {
+                out[..8].copy_from_slice(&block[..8]);
+                out[8..40].copy_from_slice(blake3::hash(block).as_bytes());
+                par_prog.inc(1);
+            }
+        });
+    });
 
     // hash all the metadata expect the header string and the placeholder meta-hash zeroes
     let metadata_map = &mut output_map[HEADER_STRING.len()..header_bytes + hashes_bytes];
