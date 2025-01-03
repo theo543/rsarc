@@ -60,6 +60,10 @@ fn read_data(input: &mut File, recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Op
         let codes_in_read = codes_per_full_read.min(block_symbols - code_idx); // last read may be smaller
         let bytes_in_read = codes_in_read * 8;
 
+        let is_last = code_idx + codes_per_full_read >= block_symbols;
+        let incomplete_read = codes_in_read != codes_per_full_read;
+        assert!(!incomplete_read || is_last);
+
         single_progress.reset();
         while file_idx + bytes_in_read.as_u64() <= file_size {
             file.read_exact_at(file_idx, &mut buf_u8[buf_idx..buf_idx + bytes_in_read]).unwrap();
@@ -68,7 +72,7 @@ fn read_data(input: &mut File, recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Op
             single_progress.inc(codes_in_read.as_u64());
         }
         if buf_idx < buf_u8.len() {
-            assert_eq!(code_idx, block_symbols - 1); // should only happen on last iteration
+            assert!(is_last);
             if file_idx < file_size {
                 let remaining_in_file = usize::try_from(file_size - file_idx).unwrap();
                 file.read_exact_at(file_idx, &mut buf_u8[buf_idx..buf_idx + remaining_in_file]).unwrap();
@@ -121,7 +125,7 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
 
     while let Some(ProcessTaskMsg{buf_rw, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
         let locked_buf = buf_rw.try_read().unwrap();
-        newton_interpolation(u64_as_gf64(&locked_buf), offset, codes, None, poly, memory);
+        newton_interpolation(u64_as_gf64(&locked_buf[0..codes * data_blocks]), offset, codes, None, poly, memory);
         drop(locked_buf);
         let is_last = reader_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1;
         if is_last {
