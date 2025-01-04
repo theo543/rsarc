@@ -1,14 +1,13 @@
 #![warn(clippy::all)]
 
-use std::{fs::OpenOptions, io::{self, BufWriter, Write}};
-
-mod gf64;
-mod polynomials;
+mod math;
+mod utils;
 mod encoder;
-mod progress;
+
+use std::fs::OpenOptions;
 
 use encoder::{EncodeOptions, encode};
-use progress::progress;
+use utils::{gen_test_file, ShareModeExt};
 
 /*
 Block = contiguous, contains one symbol from each RS code.
@@ -27,61 +26,17 @@ Later: Implement metadata redundancy to recover from header corruption by interl
        This will require some magic string prepended to each block, i.e. "HEADERRECOVERY", and a hash, to locate meta-parity blocks.
 */
 
-trait ShareModeExt {
-    fn share_mode_lock(&mut self) -> &mut Self;
-}
-
-#[cfg(windows)]
-impl ShareModeExt for OpenOptions {
-    fn share_mode_lock(&mut self) -> &mut Self {
-        // don't allow other processes to delete or write to the file
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_SHARE_READ: u32 = 0x00000001;
-        self.share_mode(FILE_SHARE_READ);
-        self
-    }
-}
-
-#[cfg(not(windows))]
-impl ShareModeExt for OpenOptions {
-    // not supported
-    fn share_mode_lock(&mut self) -> &mut Self { self }
-}
-
 const TEST_FILE_NAME: &str = "test.txt";
 const OUTPUT_FILE_NAME: &str = "out.rsarc";
-const TEXT: &str = " TEST FILE FOR RSARC ENCODER\n";
-
-fn gen_test_file(file_size: u64) -> io::Result<()> {
-    if std::fs::metadata(TEST_FILE_NAME).map(|m| m.len() == file_size).unwrap_or(false) { return Ok(()); }
-    let test_file = OpenOptions::new().read(false).write(true).truncate(false).create(true).open(TEST_FILE_NAME)?;
-    test_file.set_len(file_size)?;
-    let mut test_file = BufWriter::new(test_file);
-
-    let p = progress(file_size, "test file");
-    let digits = (file_size / TEXT.len() as u64).ilog10() as usize + 1;
-    let chunk_size = digits + TEXT.len();
-    let chunks = file_size / chunk_size as u64;
-    for i in 0..chunks {
-        write!(test_file, "{i:0d$}{TEXT}", d = digits)?;
-        p.inc(chunk_size as u64);
-    }
-    test_file.write_all(&vec![b'\n'; (file_size % chunk_size as u64) as usize])?;
-
-    let test_file = test_file.into_inner()?;
-    test_file.sync_all()?;
-    p.finish_and_clear();
-    Ok(())
-}
 
 fn main() {
-    gf64::check_cpu_support_for_carryless_multiply();
+    math::gf64::check_cpu_support_for_carryless_multiply();
 
     let input_size = 1024 * 1024 * 1024 * 15;
     let block_bytes = 1024 * 1024 * 150;
     let parity_blocks = 50;
 
-    gen_test_file(input_size).expect("generating test file");
+    gen_test_file(input_size, TEST_FILE_NAME).expect("generating test file");
 
     let mut input = OpenOptions::new().read(true).share_mode_lock().open(TEST_FILE_NAME).unwrap();
     let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open(OUTPUT_FILE_NAME).unwrap();
@@ -90,5 +45,5 @@ fn main() {
     encode(&mut input, &mut output, EncodeOptions{block_bytes, parity_blocks});
     println!("Time: {:?}", start_time.elapsed());
 
-    gf64::print_stats();
+    math::gf64::print_stats();
 }

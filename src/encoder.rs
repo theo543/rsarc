@@ -8,17 +8,10 @@ use indicatif::ProgressBar;
 use memmap2::MmapOptions;
 use positioned_io::{RandomAccessFile, ReadAt};
 
-use crate::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
-use crate::polynomials::{evaluate_poly, newton_interpolation};
-use crate::progress::{progress_usize as progress, make_multiprogress};
-
-trait IntoU64Ext {
-    fn as_u64(&self) -> u64;
-}
-
-impl IntoU64Ext for usize {
-    fn as_u64(&self) -> u64 { u64::try_from(*self).unwrap() }
-}
+use crate::math::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
+use crate::math::polynomials::{evaluate_poly, newton_interpolation};
+use crate::utils::progress::{progress_usize as progress, make_multiprogress};
+use crate::utils::IntoU64Ext;
 
 // Data symbols from multiple codes are read in at once, to try to minimize read overhead
 // RwLock is only used as a thread-safe RefCell, not for blocking

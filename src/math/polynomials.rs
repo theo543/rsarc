@@ -1,4 +1,4 @@
-use crate::gf64::GF64;
+use super::gf64::GF64;
 
 fn multiply_by_x_plus_a(poly: &mut [GF64], a: GF64) {
     assert!(poly.len() > 1);
@@ -78,7 +78,7 @@ pub fn evaluate_poly(poly: &[GF64], x: GF64) -> GF64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::gf64::tests::{gf64, gf64_array};
+    use crate::math::gf64::tests::{gf64, gf64_array};
     use super::{GF64, evaluate_poly, newton_interpolation};
 
     fn distinct_gf64_array<const N: usize>() -> [GF64; N] {
