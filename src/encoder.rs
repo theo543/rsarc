@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{Read, Seek, Write};
+use std::io::{self, Read, Seek, Write};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use crossbeam_channel::{unbounded as channel, Sender, Receiver};
@@ -36,48 +36,84 @@ struct ReadDataMsg {
     codes: usize // last message may have less codes
 }
 
-#[allow(clippy::too_many_arguments)]
-fn read_data(input: &mut File, recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>, block_symbols: usize, codes_per_full_read: usize, file_size: u64,
-             progress: &ProgressBar, single_progress: &ProgressBar) {
+// Position of blocks in file. Can be none, a range, or a list of indices.
+enum BlockIndices {
+    None,
+    Range{initial_file_idx: u64, exclusive_end_file_idx: u64, step: u64},
+    Some(Vec<u64>),
+}
 
-    let file = RandomAccessFile::try_new(input.try_clone().unwrap()).unwrap();
+fn iter_block_indices<F: FnMut(u64) -> io::Result<()>>(indices: &BlockIndices, mut f: F) -> io::Result<()> {
+    match indices {
+        BlockIndices::None => {},
+        BlockIndices::Range{initial_file_idx, exclusive_end_file_idx, step} => {
+            let mut file_idx = *initial_file_idx;
+            while file_idx < *exclusive_end_file_idx {
+                f(file_idx)?;
+                file_idx += *step;
+            }
+        },
+        BlockIndices::Some(v) => {
+            for file_idx in v {
+                f(*file_idx)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: &BlockIndices, symbol_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
+    let mut incomplete_read_occurred = false;
+    iter_block_indices(indices, |base_file_idx| {
+        let file_idx = base_file_idx + offset;
+        if file_idx + symbol_bytes.as_u64() <= file_len {
+            file.read_exact_at(file_idx, &mut buf[*buf_idx..*buf_idx + symbol_bytes])?;
+        } else {
+            assert!(file_idx < file_len, "a block should never be completely outside the file");
+
+            assert!(!incomplete_read_occurred, "an incomplete read should only happen once at the end of the file");
+            incomplete_read_occurred = true;
+
+            let remaining_in_file = usize::try_from(file_len - file_idx).unwrap();
+            file.read_exact_at(file_idx, &mut buf[*buf_idx..*buf_idx + remaining_in_file])?;
+            buf[*buf_idx + remaining_in_file..*buf_idx + symbol_bytes].fill(0);
+        }
+        *buf_idx += symbol_bytes;
+        Ok(())
+    })?;
+    Ok(incomplete_read_occurred)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>,
+             block_symbols: usize, codes_per_full_read: usize,
+             input: &mut File, output: &mut File,
+             input_file_size: u64, output_file_size: u64,
+             good_indices: (BlockIndices, BlockIndices),
+             progress: &ProgressBar, single_progress: &ProgressBar) -> io::Result<()> {
+
+    let input = RandomAccessFile::try_new(input.try_clone()?)?;
+    let output = RandomAccessFile::try_new(output.try_clone()?)?;
 
     for code_idx in (0..block_symbols).step_by(codes_per_full_read) {
         let buf_rw = recv_buf.recv().unwrap();
         let mut buf_guard = buf_rw.try_write().unwrap();
         let buf = &mut *buf_guard;
-        assert_eq!(buf.len().as_u64(), codes_per_full_read.as_u64() * file_size.div_ceil(block_symbols.as_u64() * 8));
+        assert_eq!(buf.len().as_u64(), codes_per_full_read.as_u64() * input_file_size.div_ceil(block_symbols.as_u64() * 8));
         let buf_u8 = u64_buf_as_u8(buf);
 
-        let mut buf_idx = 0;
-        let mut file_idx = code_idx.as_u64();
         let codes_in_read = codes_per_full_read.min(block_symbols - code_idx); // last read may be smaller
         let bytes_in_read = codes_in_read * 8;
 
         let is_last = code_idx + codes_per_full_read >= block_symbols;
-        let incomplete_read = codes_in_read != codes_per_full_read;
-        assert!(!incomplete_read || is_last);
 
         single_progress.reset();
-        while file_idx + bytes_in_read.as_u64() <= file_size {
-            file.read_exact_at(file_idx, &mut buf_u8[buf_idx..buf_idx + bytes_in_read]).unwrap();
-            buf_idx += bytes_in_read;
-            file_idx += block_symbols.as_u64() * 8;
-            single_progress.inc(codes_in_read.as_u64());
-        }
-        if buf_idx < buf_u8.len() {
-            assert!(is_last);
-            if file_idx < file_size {
-                let remaining_in_file = usize::try_from(file_size - file_idx).unwrap();
-                file.read_exact_at(file_idx, &mut buf_u8[buf_idx..buf_idx + remaining_in_file]).unwrap();
-                buf_u8[buf_idx + remaining_in_file..buf_idx + bytes_in_read].fill(0);
-            } else {
-                buf_u8[buf_idx..].fill(0);
-            }
-        } else {
-            assert_eq!(codes_in_read, codes_per_full_read);
-            assert_eq!(buf_idx, buf_u8.len());
-        }
+        let mut buf_idx = 0;
+        let offset = code_idx.as_u64() * 8;
+        let incomplete_input_read = read_symbols_from_file(&input, input_file_size, offset, &good_indices.0, bytes_in_read, &mut buf_idx, buf_u8)?;
+        assert!(!incomplete_input_read || is_last, "an incomplete read can only happen in the final read from the input file");
+        let incomplete_output_read = read_symbols_from_file(&output, output_file_size, offset, &good_indices.1, bytes_in_read, &mut buf_idx, buf_u8)?;
+        assert!(!incomplete_output_read, "output file contains only full blocks");
         single_progress.finish();
 
         for x in buf.iter_mut() {
@@ -90,6 +126,7 @@ fn read_data(input: &mut File, recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Op
     }
 
     send_buf.send(None).unwrap(); // shut down read_to_processors
+    Ok(())
 }
 
 struct ProcessTaskMsg {
@@ -182,7 +219,8 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
 
     let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
 
-    output.set_len((HEADER_LEN + hashes_bytes + parity_blocks_bytes).as_u64()).unwrap();
+    let output_file_len = (HEADER_LEN + hashes_bytes + parity_blocks_bytes).as_u64();
+    output.set_len(output_file_len).unwrap();
     output.write_all(&header).unwrap();
 
     let mut output_map = unsafe { MmapOptions::new().map_mut(&*output).unwrap() };
@@ -239,7 +277,15 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
 
         // spawn threads
         std::thread::scope(|s| {
-            let reader = s.spawn(|| read_data(input, &return_data.1, &data_to_adapter.0, block_symbols, symbols_read_per_code, file_len, &read_prog, &single));
+            //let reader = s.spawn(|| read_data(input, &return_data.1, &data_to_adapter.0, block_symbols, symbols_read_per_code, file_len, &read_prog, &single));
+            let reader = s.spawn(|| read_data(
+                &return_data.1, &data_to_adapter.0,
+                block_symbols, symbols_read_per_code,
+                input, output,
+                file_len, output_file_len,
+                (BlockIndices::Range{initial_file_idx: 0, exclusive_end_file_idx: file_len, step: opt.block_bytes.as_u64()}, BlockIndices::None),
+                &read_prog, &single
+            ));
             let read_to_processors = s.spawn(|| read_to_processors(&data_to_adapter.1, &adapter_to_processors.0));
             let processor_threads = (0..cpus).map(|_| {
                 s.spawn(|| process_codes(&return_parity.1, &parity.0, &adapter_to_processors.1, &return_data.0, data_blocks, opt.parity_blocks, &process_prog))
@@ -247,7 +293,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
             let writer = s.spawn(|| write_data(parity_map, &parity.1, &return_parity.0, opt.parity_blocks, block_symbols, &write_prog));
 
             // wait for all data to be read
-            reader.join().unwrap();
+            reader.join().unwrap().unwrap(); // TODO: make threads shutdown cleanly when an error is returned or a panic occurs
             read_to_processors.join().unwrap();
 
             // stop processor threads

@@ -34,9 +34,9 @@ const OUTPUT_FILE_NAME: &str = "out.rsarc";
 fn main() {
     math::gf64::check_cpu_support_for_carryless_multiply();
 
-    let input_size = 1024 * 1024 * 1024 * 15;
-    let block_bytes = 1024 * 1024 * 150;
-    let parity_blocks = 50;
+    let input_size = 1024 * 1024;
+    let block_bytes = 1024;
+    let parity_blocks = 400;
 
     gen_test_file(input_size, TEST_FILE_NAME).expect("generating test file");
 
