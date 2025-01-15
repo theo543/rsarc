@@ -147,16 +147,20 @@ fn read_to_processors(recv_data: &Receiver<Option<ReadDataMsg>>, to_processors: 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
-                 recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>, data_blocks: usize, parity_blocks: usize,
+                 recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>,
+                 data_blocks: usize, parity_blocks: usize, block_x_values: Option<&Vec<u64>>,
                  progress: &ProgressBar) {
 
     let mut memory = vec![GF64(0); data_blocks * 3];
     let (poly, memory) = memory.split_at_mut(data_blocks);
 
+    let block_x_values = block_x_values.as_ref().map(|x| u64_as_gf64(x.as_slice()));
+
     while let Some(ProcessTaskMsg{buf_rw, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
         let locked_buf = buf_rw.try_read().unwrap();
-        newton_interpolation(u64_as_gf64(&locked_buf[0..codes * data_blocks]), offset, codes, None, poly, memory);
+        newton_interpolation(u64_as_gf64(&locked_buf[0..codes * data_blocks]), offset, codes, block_x_values, poly, memory);
         drop(locked_buf);
         let is_last = reader_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1;
         if is_last {
@@ -304,7 +308,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
             ));
             let read_to_processors = s.spawn(|| read_to_processors(&data_to_adapter.1, &adapter_to_processors.0));
             let processor_threads = (0..cpus).map(|_| {
-                s.spawn(|| process_codes(&return_parity.1, &parity.0, &adapter_to_processors.1, &return_data.0, data_blocks, opt.parity_blocks, &process_prog))
+                s.spawn(|| process_codes(&return_parity.1, &parity.0, &adapter_to_processors.1, &return_data.0, data_blocks, opt.parity_blocks, None, &process_prog))
             }).collect::<Vec<_>>();
             let writer = s.spawn(|| write_data(
                 &parity.1, &return_parity.0,
