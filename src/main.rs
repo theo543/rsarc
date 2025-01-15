@@ -2,7 +2,9 @@
 
 mod math;
 mod utils;
+mod header;
 mod encoder;
+mod verifier;
 
 use std::fs::OpenOptions;
 
@@ -46,4 +48,12 @@ fn main() {
     println!("Time: {:?}", start_time.elapsed());
 
     math::gf64::print_stats();
+
+    match verifier::verify(&mut input, &mut output).unwrap() {
+        verifier::VerifyResult::Ok { data_file, parity_file } => {
+            if data_file.is_some() { println!("Data file corrupted") }
+            if parity_file.is_some() { println!("Parity file corrupted") }
+        }
+        verifier::VerifyResult::MetadataCorrupted(msg) => println!("Metadata corrupted: {}", msg),
+    }
 }

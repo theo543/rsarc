@@ -8,6 +8,7 @@ use indicatif::ProgressBar;
 use memmap2::MmapOptions;
 use positioned_io::{RandomAccessFile, ReadAt};
 
+use crate::header::{format_header, set_meta_hash, Header, HEADER_LEN, HEADER_STRING};
 use crate::math::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
 use crate::math::polynomials::{evaluate_poly, newton_interpolation};
 use crate::utils::progress::{progress_usize as progress, make_multiprogress};
@@ -164,18 +165,6 @@ pub struct EncodeOptions {
     pub parity_blocks: usize,
 }
 
-const HEADER_STRING: [u8; 24] = *b"RSARC PARITY FILE\0\0\0\0\0\0\0";
-
-fn format_header(opt: &EncodeOptions, data_blocks: usize, file_size: u64) -> Vec<u8> {
-    HEADER_STRING.into_iter()
-    .chain([0_u8; blake3::OUT_LEN])
-    .chain(opt.block_bytes.as_u64().to_le_bytes())
-    .chain(data_blocks.as_u64().to_le_bytes())
-    .chain(opt.parity_blocks.as_u64().to_le_bytes())
-    .chain(file_size.to_le_bytes())
-    .collect()
-}
-
 pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
 
     assert!(opt.block_bytes % 8 == 0, "block bytes must be divisible by 8");
@@ -185,9 +174,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
     let data_blocks = usize::try_from(file_len.div_ceil(opt.block_bytes.as_u64())).expect("data blocks number must fit in usize");
     println!("{data_blocks} data blocks");
 
-    let header = format_header(&opt, data_blocks, file_len);
-    let header_bytes = header.len();
-    assert!(header_bytes % 8 == 0);
+    let header = format_header(Header{data_blocks, parity_blocks: opt.parity_blocks, block_bytes: opt.block_bytes, file_len});
 
     // 32 bytes per hash, and first u64 from each block
     let hashes_bytes = 40 * (data_blocks + opt.parity_blocks);
@@ -195,11 +182,11 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
 
     let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
 
-    output.set_len((header_bytes + hashes_bytes + parity_blocks_bytes).as_u64()).unwrap();
+    output.set_len((HEADER_LEN + hashes_bytes + parity_blocks_bytes).as_u64()).unwrap();
     output.write_all(&header).unwrap();
 
     let mut output_map = unsafe { MmapOptions::new().map_mut(&*output).unwrap() };
-    let (hashes_map, parity_map) = output_map[header_bytes..].split_at_mut(hashes_bytes);
+    let (hashes_map, parity_map) = output_map[HEADER_LEN..].split_at_mut(hashes_bytes);
     assert_eq!(hashes_map.len(), hashes_bytes);
     assert_eq!(parity_map.len(), parity_blocks_bytes);
 
@@ -312,9 +299,9 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
     });
 
     // hash all the metadata expect the header string and the placeholder meta-hash zeroes
-    let metadata_map = &mut output_map[HEADER_STRING.len()..header_bytes + hashes_bytes];
-    let metadata_hash = blake3::hash(&metadata_map[blake3::OUT_LEN..]);
-    output_map[..blake3::OUT_LEN].copy_from_slice(metadata_hash.as_bytes());
+    assert_eq!(output_map[0..HEADER_STRING.len()], HEADER_STRING);
+    let metadata_hash = blake3::hash(&output_map[HEADER_STRING.len() + blake3::OUT_LEN..HEADER_LEN + hashes_bytes]);
+    set_meta_hash(&mut output_map, *metadata_hash.as_bytes());
 
     println!("Flush output...");
     output_map.flush().unwrap();
