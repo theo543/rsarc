@@ -39,23 +39,23 @@ struct ReadDataMsg {
 // Position of blocks in file. Can be none, a range, or a list of indices.
 enum BlockIndices {
     None,
-    Range{initial_file_idx: u64, exclusive_end_file_idx: u64, step: u64},
+    Range{initial_idx: u64, exclusive_end_idx: u64, step: u64},
     Some(Vec<u64>),
 }
 
 fn iter_block_indices<F: FnMut(u64) -> io::Result<()>>(indices: &BlockIndices, mut f: F) -> io::Result<()> {
     match indices {
         BlockIndices::None => {},
-        BlockIndices::Range{initial_file_idx, exclusive_end_file_idx, step} => {
-            let mut file_idx = *initial_file_idx;
-            while file_idx < *exclusive_end_file_idx {
-                f(file_idx)?;
-                file_idx += *step;
+        BlockIndices::Range{initial_idx, exclusive_end_idx, step} => {
+            let mut i = *initial_idx;
+            while i < *exclusive_end_idx {
+                f(i)?;
+                i += *step;
             }
         },
         BlockIndices::Some(v) => {
-            for file_idx in v {
-                f(*file_idx)?;
+            for i in v {
+                f(*i)?;
             }
         }
     }
@@ -173,25 +173,41 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
     }
 }
 
-fn write_data(mapped: &mut [u8], recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &Sender<Buf>, parity_blocks: usize, block_symbols: usize, progress: &ProgressBar) {
-    assert_eq!(mapped.len(), block_symbols * 8 * parity_blocks);
+fn iter_block_indices_usize<F: FnMut(usize) -> io::Result<()>>(indices: &BlockIndices, mut f: F) {
+    iter_block_indices(indices, |x| {
+        let x = usize::try_from(x).expect("block index must fit in usize (32-bit system?)");
+        f(x)
+    }).unwrap();
+}
 
-    // u8 to u64 conversion is safe
-    let mapped = unsafe {
-        let (mapped_prefix, mapped, mapped_trailing) = mapped.align_to_mut::<u64>();
-        assert!(mapped_prefix.is_empty(), "mmap should be 8-byte aligned");
-        assert!(mapped_trailing.is_empty(), "there should be no trailing bytes in output mmap");
-        mapped
-    };
+fn write_data(recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &Sender<Buf>,
+              mapped_input: &mut [u8], mapped_output: &mut [u8],
+              output_blocks: usize, output_indices: (BlockIndices, BlockIndices),
+              progress: &ProgressBar) -> io::Result<()> {
 
     loop {
-        let Some((parity, code_index)) = recv_parity.recv().unwrap() else { return; };
-        assert!(parity.len() == parity_blocks);
-        let mut mapped_idx = code_index;
-        for p in &parity {
-            mapped[mapped_idx] = p.to_le();
-            mapped_idx += block_symbols;
-        }
+        let Some((parity, code_index)) = recv_parity.recv().unwrap() else { return Ok(()); };
+        assert!(parity.len() == output_blocks);
+
+        let offset = code_index * 8;
+        let mut parity_idx = 0;
+        iter_block_indices_usize(&output_indices.0, |base_file_idx| {
+            let file_idx = base_file_idx + offset;
+            if file_idx + 8 <= mapped_output.len() {
+                mapped_input[file_idx..file_idx + 8].copy_from_slice(&parity[parity_idx].to_le_bytes());
+            } else {
+                assert_eq!(parity[parity_idx], 0, "values outside the file must be zero");
+            }
+            parity_idx += 1;
+            Ok(())
+        });
+        iter_block_indices_usize(&output_indices.1, |base_file_idx| {
+            let file_idx = base_file_idx + offset;
+            mapped_output[file_idx..file_idx + 8].copy_from_slice(&parity[parity_idx].to_le_bytes());
+            parity_idx += 1;
+            Ok(())
+        });
+        
         return_parity_buf.send(parity).unwrap();
         progress.inc(1);
     }
@@ -283,17 +299,22 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
                 block_symbols, symbols_read_per_code,
                 input, output,
                 file_len, output_file_len,
-                (BlockIndices::Range{initial_file_idx: 0, exclusive_end_file_idx: file_len, step: opt.block_bytes.as_u64()}, BlockIndices::None),
+                (BlockIndices::Range{initial_idx: 0, exclusive_end_idx: file_len, step: opt.block_bytes.as_u64()}, BlockIndices::None),
                 &read_prog, &single
             ));
             let read_to_processors = s.spawn(|| read_to_processors(&data_to_adapter.1, &adapter_to_processors.0));
             let processor_threads = (0..cpus).map(|_| {
                 s.spawn(|| process_codes(&return_parity.1, &parity.0, &adapter_to_processors.1, &return_data.0, data_blocks, opt.parity_blocks, &process_prog))
             }).collect::<Vec<_>>();
-            let writer = s.spawn(|| write_data(parity_map, &parity.1, &return_parity.0, opt.parity_blocks, block_symbols, &write_prog));
+            let writer = s.spawn(|| write_data(
+                &parity.1, &return_parity.0,
+                &mut [], parity_map,
+                opt.parity_blocks, (BlockIndices::None, BlockIndices::Range{initial_idx: 0, exclusive_end_idx: parity_blocks_bytes.as_u64(), step: opt.block_bytes.as_u64()}),
+                &write_prog
+            ));
 
             // wait for all data to be read
-            reader.join().unwrap().unwrap(); // TODO: make threads shutdown cleanly when an error is returned or a panic occurs
+            reader.join().unwrap().unwrap(); // TODO: make threads shutdown in case of error
             read_to_processors.join().unwrap();
 
             // stop processor threads
@@ -306,7 +327,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
 
             // stop writer thread
             parity.0.send(None).unwrap();
-            writer.join().unwrap();
+            writer.join().unwrap().unwrap();
         });
 
     }
