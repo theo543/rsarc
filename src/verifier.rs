@@ -1,12 +1,25 @@
 use std::{fs::File, io::{self, Read, Seek}};
 
-use crate::{header::{get_meta_hash, read_header, HEADER_LEN, HEADER_STRING}, utils::IntoU64Ext};
+use crate::{header::{get_meta_hash, read_header, Header, HEADER_LEN, HEADER_STRING}, utils::IntoU64Ext};
 
 type VerifBools = Option<Box<[bool]>>;
 
 pub enum VerifyResult {
-    Ok{data_file: VerifBools, parity_file: VerifBools},
+    Ok{data_file: VerifBools, parity_file: VerifBools, header: Header},
     MetadataCorrupted(String),
+}
+
+impl VerifyResult {
+    pub fn report_corruption(&self, panic_on_corruption: bool) {
+        match self {
+            VerifyResult::Ok { data_file, parity_file, .. } => {
+                if data_file.is_some() { println!("Data file corrupted") }
+                if parity_file.is_some() { println!("Parity file corrupted") }
+                if data_file.is_none() && parity_file.is_none() { println!("No corruption detected") } else if panic_on_corruption { panic!() }
+            }
+            VerifyResult::MetadataCorrupted(msg) => { println!("Metadata corrupted: {}", msg); if panic_on_corruption { panic!() } }
+        }
+    }
 }
 
 pub fn verify_file(file: &mut File, hashes: &[u8], block_bytes: usize, blocks: usize, mut len: u64) -> io::Result<VerifBools> {
@@ -80,5 +93,5 @@ pub fn verify(input: &mut File, parity: &mut File) -> io::Result<VerifyResult> {
     parity.seek(io::SeekFrom::Start(HEADER_LEN as u64 + hashes_bytes as u64))?;
     let parity_file = verify_file(parity, par_hashes, header.block_bytes, header.parity_blocks, parity_bytes)?;
 
-    Ok(VerifyResult::Ok{data_file, parity_file})
+    Ok(VerifyResult::Ok{data_file, parity_file, header})
 }

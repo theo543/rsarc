@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::sync::atomic::AtomicUsize;
@@ -62,29 +64,30 @@ fn iter_block_indices<F: FnMut(u64) -> io::Result<()>>(indices: &BlockIndices, m
     Ok(())
 }
 
-fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: &BlockIndices, symbol_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
+fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: &BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
     let mut incomplete_read_occurred = false;
     iter_block_indices(indices, |base_file_idx| {
         let file_idx = base_file_idx + offset;
-        if file_idx + symbol_bytes.as_u64() <= file_len {
-            file.read_exact_at(file_idx, &mut buf[*buf_idx..*buf_idx + symbol_bytes])?;
+        if file_idx + symbols_bytes.as_u64() <= file_len {
+            file.read_exact_at(file_idx, &mut buf[*buf_idx..*buf_idx + symbols_bytes])?;
         } else {
-            assert!(file_idx < file_len, "a block should never be completely outside the file");
-
             assert!(!incomplete_read_occurred, "an incomplete read should only happen once at the end of the file");
             incomplete_read_occurred = true;
 
-            let remaining_in_file = usize::try_from(file_len - file_idx).unwrap();
-            file.read_exact_at(file_idx, &mut buf[*buf_idx..*buf_idx + remaining_in_file])?;
-            buf[*buf_idx + remaining_in_file..*buf_idx + symbol_bytes].fill(0);
+            if file_idx < file_len {
+                let remaining_in_file = usize::try_from(file_len - file_idx).unwrap();
+                file.read_exact_at(file_idx, &mut buf[*buf_idx..*buf_idx + remaining_in_file])?;
+                buf[*buf_idx + remaining_in_file..*buf_idx + symbols_bytes].fill(0);
+            } else {
+                buf[*buf_idx..*buf_idx + symbols_bytes].fill(0);
+            }
         }
-        *buf_idx += symbol_bytes;
+        *buf_idx += symbols_bytes;
         Ok(())
     })?;
     Ok(incomplete_read_occurred)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>,
              block_symbols: usize, codes_per_full_read: usize,
              input: &mut File, output: &mut File,
@@ -99,19 +102,15 @@ fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>
         let buf_rw = recv_buf.recv().unwrap();
         let mut buf_guard = buf_rw.try_write().unwrap();
         let buf = &mut *buf_guard;
-        assert_eq!(buf.len().as_u64(), codes_per_full_read.as_u64() * input_file_size.div_ceil(block_symbols.as_u64() * 8));
         let buf_u8 = u64_buf_as_u8(buf);
 
         let codes_in_read = codes_per_full_read.min(block_symbols - code_idx); // last read may be smaller
         let bytes_in_read = codes_in_read * 8;
 
-        let is_last = code_idx + codes_per_full_read >= block_symbols;
-
         single_progress.reset();
         let mut buf_idx = 0;
         let offset = code_idx.as_u64() * 8;
-        let incomplete_input_read = read_symbols_from_file(&input, input_file_size, offset, &good_indices.0, bytes_in_read, &mut buf_idx, buf_u8)?;
-        assert!(!incomplete_input_read || is_last, "an incomplete read can only happen in the final read from the input file");
+        read_symbols_from_file(&input, input_file_size, offset, &good_indices.0, bytes_in_read, &mut buf_idx, buf_u8)?;
         let incomplete_output_read = read_symbols_from_file(&output, output_file_size, offset, &good_indices.1, bytes_in_read, &mut buf_idx, buf_u8)?;
         assert!(!incomplete_output_read, "output file contains only full blocks");
         single_progress.finish();
@@ -147,10 +146,10 @@ fn read_to_processors(recv_data: &Receiver<Option<ReadDataMsg>>, to_processors: 
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
                  recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>,
-                 data_blocks: usize, parity_blocks: usize, block_x_values: Option<&Vec<u64>>,
+                 data_blocks: usize, parity_blocks: usize,
+                 block_x_values: Option<&Vec<u64>>, output_x_values: Option<&Vec<u64>>,
                  progress: &ProgressBar) {
 
     let mut memory = vec![GF64(0); data_blocks * 3];
@@ -169,8 +168,14 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
         }
         let mut parity_buf = recv_parity_buf.recv().unwrap();
         assert_eq!(parity_buf.len(), parity_blocks);
-        for (x, y) in u64_as_gf64_mut(&mut parity_buf).iter_mut().enumerate() {
-            *y = evaluate_poly(poly, GF64((data_blocks + x).as_u64()));
+        if let Some(output_x_values) = output_x_values {
+            for (x, y) in u64_as_gf64(output_x_values).iter().zip(u64_as_gf64_mut(&mut parity_buf)) {
+                *y = evaluate_poly(poly, *x);
+            }
+        } else {
+            for (x, y) in u64_as_gf64_mut(&mut parity_buf).iter_mut().enumerate() {
+                *y = evaluate_poly(poly, GF64((data_blocks + x).as_u64()));
+            }
         }
         send_parity.send(Some((parity_buf, code_idx))).unwrap();
         progress.inc(1);
@@ -197,7 +202,7 @@ fn write_data(recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &
         let mut parity_idx = 0;
         iter_block_indices_usize(&output_indices.0, |base_file_idx| {
             let file_idx = base_file_idx + offset;
-            if file_idx + 8 <= mapped_output.len() {
+            if file_idx + 8 <= mapped_input.len() {
                 mapped_input[file_idx..file_idx + 8].copy_from_slice(&parity[parity_idx].to_le_bytes());
             } else {
                 assert_eq!(parity[parity_idx], 0, "values outside the file must be zero");
@@ -222,32 +227,13 @@ pub struct EncodeOptions {
     pub parity_blocks: usize,
 }
 
-pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
-
-    assert!(opt.block_bytes % 8 == 0, "block bytes must be divisible by 8");
-    let block_symbols = opt.block_bytes / 8;
-    let file_len = input.metadata().unwrap().len();
-
-    let data_blocks = usize::try_from(file_len.div_ceil(opt.block_bytes.as_u64())).expect("data blocks number must fit in usize");
-    println!("{data_blocks} data blocks");
-
-    let header = format_header(Header{data_blocks, parity_blocks: opt.parity_blocks, block_bytes: opt.block_bytes, file_len});
-
-    // 32 bytes per hash, and first u64 from each block
-    let hashes_bytes = 40 * (data_blocks + opt.parity_blocks);
-    assert!(hashes_bytes % 8 == 0);
-
-    let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
-
-    let output_file_len = (HEADER_LEN + hashes_bytes + parity_blocks_bytes).as_u64();
-    output.set_len(output_file_len).unwrap();
-    output.write_all(&header).unwrap();
-
-    let mut output_map = unsafe { MmapOptions::new().map_mut(&*output).unwrap() };
-    let (hashes_map, parity_map) = output_map[HEADER_LEN..].split_at_mut(hashes_bytes);
-    assert_eq!(hashes_map.len(), hashes_bytes);
-    assert_eq!(parity_map.len(), parity_blocks_bytes);
-
+struct PerfParams {
+    cpus: usize,
+    buf_amount: usize,
+    mem_per_buf: usize,
+    symbols_read_per_code: usize,
+}
+fn choose_cpus_and_mem(input_blocks: usize, output_blocks: usize, block_symbols: usize) -> PerfParams {
     let cpus = num_cpus::get();
 
     let (buf_amount, symbols_read_per_code) = 'a: {
@@ -257,107 +243,160 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
             use sysinfo::{System, RefreshKind, MemoryRefreshKind};
             let sys_mem = System::new_with_specifics(RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram())).available_memory();
             let mem = (sys_mem * MEM_USE_PERCENT) / 100;
-            mem.checked_sub((data_blocks * 3 * 8 * cpus).as_u64()) // substract memory used by processor threads (interpolation memory, polynomial)
-               .and_then(|x| x.checked_sub((opt.parity_blocks * 8).as_u64())) // substract memory used for output buffers
+            mem.checked_sub((input_blocks * 3 * 8 * cpus).as_u64()) // substract memory used by processor threads (interpolation memory, polynomial)
+               .and_then(|x| x.checked_sub((output_blocks * 8).as_u64())) // substract memory used for output buffers
                .unwrap_or(0)
         };
 
-        // Maybe use a direct mmap in this case?
-        if available_memory >= file_len { break 'a (1, block_symbols); }
+        if available_memory >= (input_blocks * block_symbols * 8).as_u64() { break 'a (1, block_symbols); }
 
-        let sym_per_code = available_memory / data_blocks.as_u64() * 8 * 2;
+        let sym_per_code = available_memory / input_blocks.as_u64() * 8 * 2;
         if sym_per_code > MAX_SYM_PER_CODE { ((sym_per_code / MAX_SYM_PER_CODE).clamp(1, 2) as usize, MAX_SYM_PER_CODE as usize) } else { ((sym_per_code / 2) as usize, 2) }
     };
-    println!("{symbols_read_per_code} {buf_amount}");
-    let mem_per_buf = symbols_read_per_code * data_blocks;
+    println!("Using {cpus} CPUs, {buf_amount} buffers, reading {} bytes per reading pass ({symbols_read_per_code} symbols per code)", symbols_read_per_code * 8 * input_blocks);
+    let mem_per_buf = symbols_read_per_code * input_blocks;
+    PerfParams {cpus, buf_amount, mem_per_buf, symbols_read_per_code}
+}
 
-    {
-        // create channels
-        let data_to_adapter = channel();
-        let adapter_to_processors = channel();
-        let return_data = channel();
-        let parity = channel();
-        let return_parity = channel();
+fn internal_encode_pipeline(
+        input: &mut File, output: &mut File, file_len: u64, output_file_len: u64,
+        good_blocks: usize, bad_blocks: usize, block_symbols: usize,
+        input_block_indices: (BlockIndices, BlockIndices),
+        output_block_indices: (BlockIndices, BlockIndices),
+        input_x_values: Option<Vec<u64>>, output_x_values: Option<Vec<u64>>,
+        input_map: &mut [u8], parity_map: &mut [u8]
+    ) -> io::Result<()> {
 
-        // allocate BigBuf for reading
-        for _ in 0..buf_amount {
-            return_data.0.send(Arc::new(RwLock::new(vec![0_u64; mem_per_buf].into_boxed_slice()))).unwrap();
-        }
+    let PerfParams{cpus, buf_amount, mem_per_buf, symbols_read_per_code} = choose_cpus_and_mem(good_blocks, bad_blocks, block_symbols);
 
-        // allocate Buf for writing
-        for _ in 0..cpus * 2 {
-            return_parity.0.send(vec![0; opt.parity_blocks].into_boxed_slice()).unwrap();
-        }
+    // create channels
+    let data_to_adapter = channel();
+    let adapter_to_processors = channel();
+    let return_data = channel();
+    let parity = channel();
+    let return_parity = channel();
 
-        let single = progress(data_blocks * symbols_read_per_code, "one read pass");
-        let read_prog = progress(block_symbols, "read");
-        let process_prog = progress(block_symbols, "process");
-        let write_prog = progress(block_symbols, "write");
-        make_multiprogress([&single, &read_prog, &process_prog, &write_prog]);
-
-        // spawn threads
-        std::thread::scope(|s| {
-            //let reader = s.spawn(|| read_data(input, &return_data.1, &data_to_adapter.0, block_symbols, symbols_read_per_code, file_len, &read_prog, &single));
-            let reader = s.spawn(|| read_data(
-                &return_data.1, &data_to_adapter.0,
-                block_symbols, symbols_read_per_code,
-                input, output,
-                file_len, output_file_len,
-                (BlockIndices::Range{initial_idx: 0, exclusive_end_idx: file_len, step: opt.block_bytes.as_u64()}, BlockIndices::None),
-                &read_prog, &single
-            ));
-            let read_to_processors = s.spawn(|| read_to_processors(&data_to_adapter.1, &adapter_to_processors.0));
-            let processor_threads = (0..cpus).map(|_| {
-                s.spawn(|| process_codes(&return_parity.1, &parity.0, &adapter_to_processors.1, &return_data.0, data_blocks, opt.parity_blocks, None, &process_prog))
-            }).collect::<Vec<_>>();
-            let writer = s.spawn(|| write_data(
-                &parity.1, &return_parity.0,
-                &mut [], parity_map,
-                opt.parity_blocks, (BlockIndices::None, BlockIndices::Range{initial_idx: 0, exclusive_end_idx: parity_blocks_bytes.as_u64(), step: opt.block_bytes.as_u64()}),
-                &write_prog
-            ));
-
-            // wait for all data to be read
-            reader.join().unwrap().unwrap(); // TODO: make threads shutdown in case of error
-            read_to_processors.join().unwrap();
-
-            // stop processor threads
-            for _ in 0..cpus {
-                adapter_to_processors.0.send(None).unwrap();
-            }
-            for t in processor_threads {
-                t.join().unwrap();
-            }
-
-            // stop writer thread
-            parity.0.send(None).unwrap();
-            writer.join().unwrap().unwrap();
-        });
-
+    // allocate BigBuf for reading
+    for _ in 0..buf_amount {
+        return_data.0.send(Arc::new(RwLock::new(vec![0_u64; mem_per_buf].into_boxed_slice()))).unwrap();
     }
+
+    // allocate Buf for writing
+    for _ in 0..cpus * 2 {
+        return_parity.0.send(vec![0; bad_blocks].into_boxed_slice()).unwrap();
+    }
+
+    let single = progress(good_blocks * symbols_read_per_code, "one read pass");
+    let read_prog = progress(block_symbols, "read");
+    let process_prog = progress(block_symbols, "process");
+    let write_prog = progress(block_symbols, "write");
+    make_multiprogress([&single, &read_prog, &process_prog, &write_prog]);
+
+    // spawn threads
+    std::thread::scope(|s| {
+        let reader = s.spawn(|| read_data(
+            &return_data.1, &data_to_adapter.0,
+            block_symbols, symbols_read_per_code,
+            input, output,
+            file_len, output_file_len,
+            input_block_indices,
+            &read_prog, &single
+        ));
+        let read_to_processors = s.spawn(|| read_to_processors(&data_to_adapter.1, &adapter_to_processors.0));
+        let processor_threads = (0..cpus).map(|_| {
+            s.spawn(|| process_codes(
+                &return_parity.1, &parity.0,
+                &adapter_to_processors.1, &return_data.0,
+                good_blocks, bad_blocks,
+                input_x_values.as_ref(), output_x_values.as_ref(),
+                &process_prog
+            ))
+        }).collect::<Vec<_>>();
+        let writer = s.spawn(|| write_data(
+            &parity.1, &return_parity.0,
+            input_map, parity_map,
+            bad_blocks, output_block_indices,
+            &write_prog
+        ));
+
+        // wait for all data to be read
+        reader.join().unwrap()?; // TODO: make threads shutdown in case of error
+        read_to_processors.join().unwrap();
+
+        // stop processor threads
+        for _ in 0..cpus {
+            adapter_to_processors.0.send(None).unwrap();
+        }
+        for t in processor_threads {
+            t.join().unwrap();
+        }
+
+        // stop writer thread
+        parity.0.send(None).unwrap();
+        writer.join().unwrap()?;
+        io::Result::Ok(())
+    })?;
+    Ok(())
+}
+
+pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Result<()> {
+
+    assert!(opt.block_bytes % 8 == 0, "block bytes must be divisible by 8");
+    let block_symbols = opt.block_bytes / 8;
+    let input_file_len = input.metadata()?.len();
+
+    let data_blocks = usize::try_from(input_file_len.div_ceil(opt.block_bytes.as_u64())).expect("data blocks number must fit in usize");
+    println!("{data_blocks} data blocks");
+
+    let header = format_header(Header{data_blocks, parity_blocks: opt.parity_blocks, block_bytes: opt.block_bytes, file_len: input_file_len});
+
+    // 32 bytes per hash, and first u64 from each block
+    let hashes_bytes = 40 * (data_blocks + opt.parity_blocks);
+    assert!(hashes_bytes % 8 == 0);
+
+    let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
+
+    let output_file_len = (HEADER_LEN + hashes_bytes + parity_blocks_bytes).as_u64();
+    output.set_len(output_file_len)?;
+    output.write_all(&header)?;
+
+    let mut output_map = unsafe { MmapOptions::new().map_mut(&*output)? };
+    let (hashes_map, parity_map) = output_map[HEADER_LEN..].split_at_mut(hashes_bytes);
+    assert_eq!(hashes_map.len(), hashes_bytes);
+    assert_eq!(parity_map.len(), parity_blocks_bytes);
+
+    internal_encode_pipeline(
+        input, output, input_file_len, output_file_len,
+        data_blocks, opt.parity_blocks, block_symbols,
+        (BlockIndices::Range{initial_idx: 0, exclusive_end_idx: input_file_len, step: opt.block_bytes.as_u64()}, BlockIndices::None),
+        (BlockIndices::None, BlockIndices::Range{initial_idx: 0, exclusive_end_idx: parity_blocks_bytes.as_u64(), step: opt.block_bytes.as_u64()}),
+        None, None,
+        &mut [], parity_map,
+    )?;
 
     let (data_hashes, parity_hashes) = hashes_map.split_at_mut(40 * data_blocks);
     std::thread::scope(|s| {
         let data_prog = progress(data_hashes.len() / 40, "hash data");
         let par_prog = progress(parity_hashes.len() / 40, "hash parity");
         make_multiprogress([&data_prog, &par_prog]);
-        s.spawn(|| {
+        let t = s.spawn(|| {
             let data_prog = data_prog;
             let mut buf = vec![0_u8; opt.block_bytes];
-            let last_block_rem = (file_len % opt.block_bytes.as_u64()) as usize;
-            input.seek(std::io::SeekFrom::Start(0)).unwrap();
+            let last_block_rem = (input_file_len % opt.block_bytes.as_u64()) as usize;
+            input.seek(std::io::SeekFrom::Start(0))?;
             let last_hash = data_hashes.len() / 40 - 1;
             for (i, out) in data_hashes.chunks_exact_mut(40).enumerate() {
                 if i == last_hash && last_block_rem != 0 {
                     buf.fill(0);
-                    input.read_exact(&mut buf[0..last_block_rem]).unwrap();
+                    input.read_exact(&mut buf[0..last_block_rem])?;
                 } else {
-                    input.read_exact(&mut buf).unwrap();
+                    input.read_exact(&mut buf)?;
                 }
                 out[..8].copy_from_slice(&buf[..8]);
                 out[8..40].copy_from_slice(blake3::hash(&buf).as_bytes());
                 data_prog.inc(1);
             }
+            io::Result::Ok(())
         });
         s.spawn(|| {
             let par_prog = par_prog;
@@ -367,7 +406,9 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
                 par_prog.inc(1);
             }
         });
-    });
+        t.join().unwrap()?;
+        io::Result::Ok(())
+    })?;
 
     // hash all the metadata expect the header string and the placeholder meta-hash zeroes
     assert_eq!(output_map[0..HEADER_STRING.len()], HEADER_STRING);
@@ -375,8 +416,78 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) {
     set_meta_hash(&mut output_map, *metadata_hash.as_bytes());
 
     println!("Flush output...");
-    output_map.flush().unwrap();
+    output_map.flush()?;
     drop(output_map);
-    output.flush().unwrap();
+    output.flush()?;
 
+    Ok(())
+}
+
+fn bools_to_indices(b: &Option<Box<[bool]>>, default_len: usize, invert: bool) -> Vec<u64> {
+    if let Some(b) = b {
+        b.iter().enumerate().filter_map(|(i, &x)| if x ^ invert { Some(i.as_u64()) } else { None }).collect()
+    } else if invert {
+        (0..default_len.as_u64()).collect()
+    } else {
+        vec![]
+    }
+}
+
+pub fn repair(input: &mut File, output: &mut File, header: Header, input_corruption: Option<Box<[bool]>>, output_corruption: Option<Box<[bool]>>) -> io::Result<()> {
+    let block_bytes = header.block_bytes;
+    let parity_blocks = header.parity_blocks;
+    let data_blocks = header.data_blocks;
+
+    let block_symbols = block_bytes / 8;
+
+    let input_len = input.metadata()?.len();
+    let output_len = output.metadata()?.len();
+
+    let mut input_map = unsafe { MmapOptions::new().map_mut(&*input)? };
+    let mut output_map = unsafe { MmapOptions::new().map_mut(&*output)? };
+
+    let mut good_input_blocks = bools_to_indices(&input_corruption, data_blocks, true);
+    let mut good_output_blocks = bools_to_indices(&output_corruption, parity_blocks, true);
+    let mut bad_input_blocks = bools_to_indices(&input_corruption, data_blocks, false);
+    let mut bad_output_blocks = bools_to_indices(&output_corruption, parity_blocks, false);
+
+    let mut input_x_values = good_input_blocks.clone();
+    input_x_values.extend(good_output_blocks.iter().map(|&x| x + data_blocks.as_u64()));
+
+    let mut output_x_values = bad_input_blocks.clone();
+    output_x_values.extend(bad_output_blocks.iter().map(|&x| x + data_blocks.as_u64()));
+
+    for x in good_input_blocks.iter_mut().chain(bad_input_blocks.iter_mut()) {
+        *x *= block_bytes.as_u64();
+    }
+
+    let metadata_bytes = HEADER_LEN + 40 * (data_blocks + parity_blocks);
+    for x in good_output_blocks.iter_mut().chain(bad_output_blocks.iter_mut()) {
+        *x = metadata_bytes.as_u64() + *x * block_bytes.as_u64();
+    }
+
+    let good_blocks = input_x_values.len();
+    let bad_blocks = output_x_values.len();
+
+    println!("{good_blocks} good blocks, {data_blocks} required for repair, {bad_blocks} bad blocks");
+    if good_blocks < data_blocks {
+        println!("Not enough good blocks to repair");
+        return Ok(());
+    }
+
+    internal_encode_pipeline(
+        input, output, input_len, output_len,
+        good_blocks, bad_blocks, block_symbols,
+        (BlockIndices::Some(good_input_blocks), BlockIndices::Some(good_output_blocks)),
+        (BlockIndices::Some(bad_input_blocks), BlockIndices::Some(bad_output_blocks)),
+        Some(input_x_values), Some(output_x_values),
+        &mut input_map, &mut output_map,
+    )?;
+
+    drop(input_map);
+    drop(output_map);
+    input.sync_all()?;
+    output.sync_all()?;
+
+    Ok(())
 }

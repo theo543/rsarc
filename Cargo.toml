@@ -8,10 +8,8 @@ edition = "2021"
 gf64_stats = []
 io_benchmark_no_interpolation = []
 
-[dev-dependencies]
-fastrand = "2.3.0"
-
 [dependencies]
+fastrand = "2.3.0"
 blake3 = "1.5.5"
 crossbeam-channel = "0.5.14"
 indicatif = { version = "0.17.9", default-features = false }
