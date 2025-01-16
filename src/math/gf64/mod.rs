@@ -127,25 +127,21 @@ impl GF64 {
 
         // First iteration of division is a special case because x^64 doesn't fit in u64.
         DIVISION_ITERATIONS.increment();
-        let mut quotient: u64 = 0;
-        let mut remainder: u64 = r;
-        remainder ^= new_r << (new_r.leading_zeros() + 1);
-        quotient |= 1 << (new_r.leading_zeros() + 1);
+        r ^= new_r << (new_r.leading_zeros() + 1);
+        let mut quotient: u64 = 1 << (new_r.leading_zeros() + 1);
 
         while new_r != 0 {
             EUCLIDEAN_ITERATIONS.increment();
-            loop {
-                if new_r.leading_zeros() < remainder.leading_zeros() { break; }
+            while new_r.leading_zeros() >= r.leading_zeros() {
                 DIVISION_ITERATIONS.increment();
-                let degree_diff = new_r.leading_zeros() - remainder.leading_zeros();
-                remainder ^= new_r << degree_diff;
+                let degree_diff = new_r.leading_zeros() - r.leading_zeros();
+                r ^= new_r << degree_diff;
                 quotient |= 1 << degree_diff;
             }
-            (r, new_r) = (new_r, remainder);
+            (r, new_r) = (new_r, r);
             MULTIPLICATIONS_IN_INVERSION.increment();
             (t, new_t) = (new_t, t ^ mul_u64_in_gf64(quotient, new_t));
             quotient = 0;
-            remainder = r;
         }
 
         GF64(t)
