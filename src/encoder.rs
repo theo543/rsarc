@@ -410,7 +410,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
         io::Result::Ok(())
     })?;
 
-    // hash all the metadata expect the header string and the placeholder meta-hash zeroes
+    // hash all the metadata expect the header string and the placeholder meta-hash zeros
     assert_eq!(output_map[0..HEADER_STRING.len()], HEADER_STRING);
     let metadata_hash = blake3::hash(&output_map[HEADER_STRING.len() + blake3::OUT_LEN..HEADER_LEN + hashes_bytes]);
     set_meta_hash(&mut output_map, *metadata_hash.as_bytes());

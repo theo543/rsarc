@@ -80,7 +80,7 @@ fn prepare_lookup(header: header::Header, hashes_prefixes: &[u8]) -> (PrefixLook
         last: None
     };
 
-    // if the last block is 8 bytes or less, the prefix contains the entire block padded with zeroes
+    // if the last block is 8 bytes or less, the prefix contains the entire block padded with zeros
     // return the offset and slice for the caller to write into the output file directly
     let mut tiny_last_block = None;
 
