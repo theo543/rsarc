@@ -1,8 +1,6 @@
 //! Implementation of algorithms from the paper "Novel Polynomial Basis and Its Application to Reed-Solomon Erasure Codes"
 
-use crate::math::gf64::u64_as_gf64;
-
-use super::gf64::GF64;
+use super::gf64::{GF64, u64_as_gf64};
 
 fn eval_vanishing_poly(x: GF64, j: u32) -> GF64 {
     //! The subspace vanishing polynomial W_j is zero for points in the subspace {F_0, F_1, ... F_{2^j - 1}}.
@@ -17,7 +15,7 @@ fn eval_vanishing_poly(x: GF64, j: u32) -> GF64 {
 }
 
 fn eval_normalized_vanishing_poly(x: GF64, j: u32) -> GF64 {
-    //! Normalized subspace vanishing polynomial evaluated to 1 at the point F_{2^j}, which is helpful for the transform.
+    //! Normalized subspace vanishing polynomial evaluates to 1 at the point F_{2^j}, which is helpful for the transform.
     eval_vanishing_poly(x, j) / eval_vanishing_poly(GF64(1 << j), j)
 }
 
@@ -117,6 +115,7 @@ pub fn formal_derivative(data: &mut [GF64], DerivativeFactors(factors): &Derivat
 
 pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: &[TransformFactors], d_factors: &DerivativeFactors) -> (Vec<GF64>, Vec<GF64>) {
     //! Computes values of the error locator polynomial (x + e_0) * (x + e_1) * ... * (x + e_n) and values of the formal derivative in O(n log^2 n) time.
+    assert!(!locations.is_empty());
     assert!(out_len >= locations.len());
     assert!(out_len.is_power_of_two());
     assert_eq!(t_factors.len(), out_len.ilog2() as usize);
@@ -189,9 +188,8 @@ pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: 
 
 #[cfg(test)]
 mod tests {
-    use crate::{math::{gf64::{tests::{gf64, gf64_array}, GF64}, novelpoly::{forward_transform, inverse_transform, precompute_transform_factors}, polynomials::evaluate_poly}, utils::IntoU64Ext};
-
-    use super::{compute_error_locator_poly, formal_derivative, precompute_derivative_factors};
+    use super::*;
+    use crate::{math::gf64::tests::{gf64, gf64_array}, utils::IntoU64Ext};
 
     #[test]
     fn roundtrip() {
@@ -225,7 +223,14 @@ mod tests {
     }
 
     fn eval<const N: usize, const M: usize>(poly: [GF64; N], offset: GF64) -> [GF64; M] {
-        std::array::from_fn(|i| evaluate_poly(&poly, GF64(i.as_u64()) + offset))
+        std::array::from_fn(|i| {
+            let mut result = poly[N - 1];
+            for coefficient in poly.iter().copied().rev().skip(1) {
+                result *= GF64(i as u64) + offset;
+                result += coefficient;
+            }
+            result
+        })
     }
 
     #[test]
@@ -282,37 +287,40 @@ mod tests {
         inverse_transform(&mut values, &precompute_transform_factors(128, offset));
         formal_derivative(&mut values, &precompute_derivative_factors(8));
         forward_transform(&mut values, &precompute_transform_factors(128, offset2));
-        let values2: [GF64; 128] = eval(standard_formal_derivative(poly), offset2);
-        assert_eq!(values, values2);
+        assert_eq!(values, eval(standard_formal_derivative(poly), offset2));
     }
 
-    #[test]
-    fn error_locator_zeros_and_data_recovery() {
-        let mut errors: [u64; 1024] = std::array::from_fn(|i| i as u64);
-        fastrand::shuffle(&mut errors);
-        let errors: [u64; 700] = errors[0..700].try_into().unwrap();
-        let factors = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map(|i| precompute_transform_factors(1 << i, GF64(0)));
-        let d_factors = precompute_derivative_factors(10);
-        let (error_values, error_derivative_values) = compute_error_locator_poly(&errors, 1024, &factors, &d_factors);
+    const N: usize = 512;
+    const M: usize = 64;
+    const F: usize = N.ilog2() as usize;
+    fn test_data_recovery(error_count: usize) {
 
-        let errors = errors.map(|e| e as usize);
-        for e in errors {
+        let mut errors: [u64; N] = std::array::from_fn(|i| i as u64);
+        fastrand::shuffle(&mut errors);
+
+        let factors: [TransformFactors; F] = std::array::from_fn(|i| precompute_transform_factors(1 << (F - i), GF64(0)));
+        let d_factors = precompute_derivative_factors(F);
+        let (error_values, error_derivative_values) = compute_error_locator_poly(&errors[..error_count], N, &factors, &d_factors);
+
+        let errors = || errors.iter().take(error_count).map(|e| *e as usize);
+
+        for e in errors() {
             assert_eq!(error_values[e], GF64(0));
         }
 
-        let data: [GF64; 128] = gf64_array();
-        let mut encoded = [GF64(0); 1024];
-        encoded[..128].copy_from_slice(&data);
-        for i in (128..1024).step_by(128) {
-            let slice = &mut encoded[i..i + 128];
+        let data: [GF64; M] = gf64_array();
+        let mut encoded = [GF64(0); N];
+        encoded[..M].copy_from_slice(&data);
+        for i in (M..N).step_by(M) {
+            let slice = &mut encoded[i..i + M];
             slice.copy_from_slice(&data);
-            inverse_transform(slice, &factors[3]);
-            forward_transform(slice, &precompute_transform_factors(128, GF64(i.as_u64())));
+            inverse_transform(slice, &factors[F - M.ilog2() as usize]);
+            forward_transform(slice, &precompute_transform_factors(M.as_u64(), GF64(i.as_u64())));
         }
-        let encoded2 = encoded;
+        let backup = encoded;
 
         // Simulate data loss
-        for e in errors {
+        for e in errors() {
             encoded[e] = GF64(0);
         }
 
@@ -326,7 +334,7 @@ mod tests {
         formal_derivative(&mut encoded, &d_factors);
         forward_transform(&mut encoded, &factors[0]);
 
-        for e_idx in errors {
+        for e in errors() {
             // By the product rule, (f(x) * e(x))' = f'(x) * e(x) + f(x) * e'(x)
             // At error points, e(x) = 0, so (f(x) * e(x))' = f(x) * e'(x) <=> f(x) = (f(x) * e(x))' / e'(x)
 
@@ -336,7 +344,21 @@ mod tests {
             //  e'(e_idx) = g(e_idx) + (e_idx + e_idx) * g'(x) = g(e_idx) != 0
             // This is true in all fields including GF(2^64).
 
-            assert_eq!(encoded[e_idx] / error_derivative_values[e_idx], encoded2[e_idx]);
+            assert_eq!(encoded[e] / error_derivative_values[e], backup[e]);
         }
+    }
+
+    #[test]
+    fn can_recover_data() {
+        test_data_recovery(1);
+        test_data_recovery(64);
+        test_data_recovery(199);
+        test_data_recovery(N - M); // maximum number of errors that can be corrected
+    }
+
+    #[test]
+    #[should_panic]
+    fn cannot_recover_from_too_many_errors() {
+        test_data_recovery(N - M + 1); // cannot recover, as the degree of f * e is N + 1, so interpolating with N values will almost certainly give the wrong result
     }
 }
