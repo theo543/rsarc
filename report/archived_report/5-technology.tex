@@ -1,0 +1,70 @@
+\chapter{Technology}
+
+The project is implemented with Rust, and uses external libraries for OS interaction, multithreading, progress reporting, and \texttt{blake3} hashing.
+
+\section{MultiThreaded Encoding and Decoding}
+
+The same core code is used for encoding and repairing, as the same fundamental interpolation and evaluation process is used in both cases.
+
+When generating parity data, symbols are read strictly from the data file and written strictly to the parity file.
+When repairing data, in general, symbols are read from both files, and written to the damaged files, which could be either or both of the data and parity files.
+
+The core code is given the indices of good and corrupt blocks in both files, the input and output x values to use for encoding,
+handles of the input and output files, and memory maps of the same files.
+
+In the case of encoding, it is told to use all blocks in the data file, and consider every parity block corrupt (as none exist yet).
+For repair, the verification code is used to determine which blocks are corrupt using the hashes.
+
+Reading is done using the \texttt{positioned-io} library, which allows convenient random access to files.
+Attempting to use memory maps for reading seemed to cause the file to be read into memory and remain there, with old pages not being removed from memory.
+
+For writing, the memory maps, created with the \texttt{memmap2} library, are used instead.
+
+Communication between threads is primarily done using \texttt{crossbeam-channel}, a library which provides multi-producer, multi-consumer channels.
+
+The multithreaded pipeline consists of a reader thread, an adapter thread, many processor threads, and a writer thread.
+
+Five channels are used for the following purposes:
+\begin{itemize}
+    \item Sending filled input buffers from the reader to the adapter.
+    \item Sending filled input buffers, with some additional data and reference counting added, from the adapter to the processors.
+    \item Sending filled output buffers from the processors to the writer.
+    \item Returning input buffers to the reader after they have been processed by the processors.
+    \item Returning output buffers to the processors after their data has been written by the writer.
+\end{itemize}
+
+Since multiple codes are read into an input buffer at once, reference counting and read-write locks are used to manage the sharing of input buffers between multiple processor threads.
+To return input buffers to the reader, an atomic integer is bundled with the buffer, and decremented by a processor when it finished interpolating a code from the buffer,
+so that the last processor to work on a buffer knows to return it to the reader.
+
+The adapter thread is responsible for sending many references to the same input buffer to the processors,
+wrapped in a structure that includes information about which code from the buffer to process,
+and a reference to the atomic integer used to count the number of tasks remaining for the buffer.
+
+Unlike input buffers, output buffers contain a single code. The writer relies on the operating system memory mapping system to efficiently write the data to disk, coalescing writes when possible.
+While it would be possible to gather output buffers into larger buffers and use \texttt{positioned-io} for writing as well as reading, the operating system appears to handle the write-only maps efficiently,
+and using memory maps for writing was simpler to implement.
+
+The amount of memory and number of threads used is automatically determined, using the libraries \texttt{num\_cpus} and \texttt{sysinfo} to query the OS for the available resources.
+
+\section{User Interface}
+
+The program has a basic CLI interface, implemented without any libraries.
+It supports the following commands:
+\begin{itemize}
+    \item \texttt{encode} - Generates parity data.
+    \item \texttt{verify} - Checks for corruption in the data and parity files. Code shared with the repair command for finding corrupt block locations.
+    \item \texttt{repair} - Repairs corruption in the data or parity files, if there is enough redundancy.
+    \item \texttt{reassemble} - Attempts to find misplaced blocks in the data and parity files, and copies them to new files in the correct locations.
+    \item \texttt{test} - Runs an end-to-end test of the encoding, verification, and repair commands. (default)
+\end{itemize}
+
+Progress reporting is done using the terminal progress bar library \texttt{indicatif}.
+
+\section{Testing}
+
+The finite field and polynomial arithmetic code is testing with random data (generated using \texttt{fastrand}) using Rust's built-in testing framework.
+
+The encoding, verification, and repair code is tested using the aforementioned end-to-end test, which randomly corrupts a test file and attempts to repair it.
+
+Automated testing has not yet been implemented for the \texttt{reassemble} command. Manual testing was successful.

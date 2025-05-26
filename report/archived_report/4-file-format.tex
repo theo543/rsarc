@@ -1,0 +1,56 @@
+\chapter{File Format}
+
+Currently, parity data is stored in a separate file, specified by the user.
+Support for multiple input files, and single-file archives is planned, but not yet implemented.
+
+The parity file contains necessary metadata and hashes for error detection.
+
+\section{Metadata}
+
+The parity file header contains the expected size of the data file, the number of data and parity blocks, and the size of a block.
+It also contains a hash of the file metadata (excluding the hash itself), used to detect metadata corruption.
+
+It is necessary to store the size of the data file, even though the block size and number of data blocks are also stored,
+because the last block is allowed to be incomplete, and is implicitly padded with zeros for the Reed-Solomon encoding.
+The size of the data file cannot be inferred from the block size and number of blocks.
+
+Currently, metadata repair is not supported. It could be implemented by creating meta-parity blocks and interleaving them with the normal parity blocks.
+These blocks would require a header string and hash embedded in them, to allow locating them to recover the metadata.
+
+After the file header and metadata hash, the hashes and first 8 bytes of each block are stored.
+
+The purpose of the 8-byte prefixes is to allow reassembly of the data and parity files if somehow the blocks become scrambled.
+This should not happen as a result of normal corruption, which would edit bytes but not insert or delete,
+but it could theoretically happen as a result of a bug in some network transfer or filesystem operation.
+While it's extremely unlikely such a thing would happen, it costs very little space to include the prefixes,
+and without them, deletion or insertion of a single byte would completely defeat the error correction scheme.
+
+Such errors can be simulated by inserting or deleting characters in Notepad or a hex editor, and by cutting and pasting large sections of the file around.
+Reassembly should have no issue recovering from these errors, with only a few blocks (the ones cut in half) being lost.
+
+Note that without metadata repair, any errors that hit the metadata will still be fatal, but the metadata should be a small part of the file.
+
+\section{Blocks}
+
+The input file is split into data blocks, and the generated parity file contains parity blocks.
+Blocks are not, as might be expected, individual Reed-Solomon codes.
+If they were, damage to a block could not repaired using other blocks, as they would be completely independent.
+
+Let $b$ be the number of blocks, and $n$ the number of 64-bit symbols in a block.
+
+It might be expected that there are $b$ Reed-Solomon codes, each with $n$ symbols, but it is instead the opposite.
+
+There are $n$ Reed-Solomon codes, each with $b$ symbols.
+A code is made up of all symbols at a given index in each block.
+If a block is lost, this results in losing one symbol from each code.
+
+This scheme is necessary for several reasons:
+\begin{itemize}
+    \item Due to the $\bigO(n^2)$ time complexity of the encoding and repair algorithms, attempting to treat a file as one big code would be far too slow.
+    \item The interpolation algorithm would produce a polynomial of the size as the file. A terabyte file would produce a terabyte polynomial, which would need to be kept on disk until all parity blocks are generated.
+    \item Repair would always require processing the entire file, even if only a single block is lost.
+\end{itemize}
+
+The downside is that codes are not contiguous on disk, requiring reading and writing to many different locations.
+Naively processing one code at a time would require one system call per symbol.
+To mitigate this, many codes are read at once, depending on the available memory, and processed in parallel on all available cores.

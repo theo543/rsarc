@@ -1,0 +1,24 @@
+\begin{abstractpage}
+
+\begin{abstract}
+
+
+This project aims to implement file corruption repair using Reed-Solomon error-correcting codes.
+The code used is an erasure code over the field \GF{64}, implemented using Newton interpolation.
+
+Finite field multiplication is implemented using carry-less multiplication, and division is implemented using the extended Euclidean algorithm.
+
+The implementation is a CLI program that can generate parity data for a given file, and later detect and repair corruption.
+
+The file is split into blocks, and an arbitrary number of parity blocks can be generated.
+Repair requires as many intact blocks as there were data blocks originally.
+Block corruption is detected using a hash.
+
+The program processes multiple codes at once.
+This is necessary, as each code is spread across the file, which would cause a naive implementation to perform a system call for each symbol.
+
+Multithreading is used to speed up the polynomial interpolation and evaluation.
+
+\end{abstract}
+
+\end{abstractpage}

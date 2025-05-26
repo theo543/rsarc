@@ -1,0 +1,52 @@
+\chapter{Polynomial Interpolation and Evaluation}
+
+\section{Horner's Rule}
+
+Horner's rule is a method for evaluating polynomials in $\bigO(n)$ time.
+
+A polynomial $a_0 + a_1 x + \ldots + a_{n-1} x^{n-1}$ can be written as $a_0 + x(a_1 + x(a_2 + \ldots + x(a_{n-1}) \ldots))$.
+
+It can then be evaluated from the inside out, starting with the highest degree coefficient $a_{n-1}$,
+and repeatedly multiplying by $x$ and adding the next coefficient.
+
+\section{Newton Interpolation}
+
+Polynomial interpolation is used to find a polynomial of degree at most $k - 1$ that passes through $k$ points, where the x coordinates of the points are distinct.
+It is known that this polynomial is unique.
+
+Newton interpolation is the polynomial interpolation algorithm used in this project to interpolate data in $\bigO(n^2)$ time and $\bigO(n)$ space, where $n$ is the number of points.
+
+The Newton interpolation polynomial is a linear combination of basis polynomials.
+
+\begin{equation}
+    N(x) = \sum_{k=0}^{n} \;\; [y_0, \ldots, y_k] \cdot \prod_{i=0}^{k-1} (x - x_i)
+\end{equation}
+
+The notation $[y_k, \ldots, y_{k+j}]$ denotes the divided difference, which is recursively defined as follows:
+
+\begin{equation}
+    [y_k] = y_k
+\end{equation}
+
+\begin{equation}
+    [y_k, \ldots, y_{k+j}] = \frac{[y_{k+1}, \ldots, y_{k+j}] - [y_k, \ldots, y_{k+j-1}]}{x_{k+j} - x_k}
+\end{equation}
+
+Naive computation of divided differences requires $\bigO(n^2)$ time and space, but the space requirement can be reduced to $\bigO(n)$ by reusing values from previous iterations.
+
+At the initial iteration, the basis polynomial is initialized to $n_0(x) = 1$ and the list of divided differences is initialized to $[y_0]$.
+
+At any iteration $k + 1$, divided differences $[y_0, \ldots, y_k], [y_1, \ldots, y_k], \ldots, [y_{k-1}, y_k], [y_k]$ are known from previous iterations.
+
+The value $[y_{k+1}]$ is added to the list of divided differences, and the rest of the values are updated to
+$[y_0, \ldots, y_{k+1}], [y_1, \ldots, y_{k+1}], \ldots, [y_{k-1}, y_{k+1}], [y_k, y_{k+1}]$, from right to left.
+At every step of the update, the next divided difference is computed using the current value and the value to its right (which was updated in the previous step).
+
+The basis polynomial is $n_{k+1}$ is computed by multiplying the previous basis polynomial by $x - x_k$.
+
+The interpolation polynomial is updated by adding the basis polynomial multiplied by the divided difference to it.
+
+At each iteration, we perform multiplication by $x - x_k$, update the divided differences, and update the interpolation polynomial.
+Since these steps require $\bigO(k)$ time, and we perform $n$ iterations, the total time complexity is $\bigO(n^2)$.
+
+No general polynomial multiplication is required, nor is any polynomial division (only \GF{64} division in the divided differences).

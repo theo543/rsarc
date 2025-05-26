@@ -1,0 +1,149 @@
+\chapter{Finite Field Arithmetic}
+
+The constant $\text{POLYNOMIAL}$ referred to in pseudocode is the irreducible polynomial $x^{64} + x^4 + x^3 + x + 1$,
+with the coefficient $x^{64}$ omitted, as it does not fit in a 64-bit integer. \cite{low-weight-polynomials}
+
+As previously mentioned, Reed-Solomon codes require the use of non-standard arithmetic - arithmetic over finite fields.
+
+In modular arithmetic, a modular inverse exists only for elements that are coprime with the modulus, i.e. only multiplication by odd numbers is invertible modulo $2^n$.
+The field axioms require that all elements have a multiplicative inverse.
+
+Using \GF{64} arithmetic is necessary to resolve this issue, but complicates the arithmetic.
+Addition is extremely simple, as it is equivalent to XOR.
+Multiplication, however, is less efficient than standard multiplication, and divison even less so.
+
+\section{Russian Peasant Algorithm}
+
+The Russian peasant algorithm multiplies two values in \GF{64} without requiring 128-bit integers.
+It incrementally performs the multiplication by adding intermediate values into an accumulator, and slowly shifting the values to be multiplied and applying polynomial reduction.
+
+The state of the algorithm consists of the two values to be multiplied $a$ and $b$, and an accumulator.
+
+The algorithm must be executed at most 64 times, before $b$ is guaranteed to become zero. Then, the accumulator contains the result.
+
+At each iteration, if the low bit of $b$ is set, the accumulator is XORed with $a$.
+Then, $a$ is shifted left, and $b$ is shifted right.
+
+This is justified because, at each step, we multiply the lowest coefficient of $b$ with $a$, and add the result (either $0$ or $a$) to the accumulator.
+Then, moving on to the next coefficient of $b$, we divide $b$ by $x$ and multiply $a$ by $x$, which is equivalent to shifting $a$ left and $b$ right.
+
+If the high bit of $a$ was set before shifting, $a$ is XORed with the irreducible polynomial.
+This is because, conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), which requires reduction, done by subtracting the irreducible polynomial using XOR.
+
+% pseudo code
+\begin{algorithm}
+\caption{Russian Peasant Multiplication}
+\begin{algorithmic}
+\Function{Multiply}{$a, b$}
+\State $acc \gets 0$
+% repeat 64 times
+\For{$\text{i} \gets 1 \text{ to } 64$}
+    \If{$b \bitand 1$}
+        \State $acc \gets acc \oplus a$
+    \EndIf
+    \State $\text{carry} \gets a \bitand (1 \ll 63)$
+    \State $a \gets a \ll 1$
+    \State $b \gets b \gg 1$
+    \If{$\text{carry}$}
+        \State $a \gets a \oplus \text{POLYNOMIAL}$
+    \EndIf
+\EndFor
+\State \Return $acc$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+
+This algorithm is fairly simple and easy to implement, but multiplication can be done more efficiently on modern CPUs.
+Still, this algorithm is necessary as a fallback, for CPUs which don't support 128-bit carry-less multiplication.
+
+\section{Multiplication - Carry-less Multiplication}
+
+\GF{64} multiplication can be performed using only three 128-bit carry-less multiplication operations.
+Modern CPUs have support for this operation, as it is useful for cryptographic algorithms, computing checksums, and other applications. \cite{intel-clmul}
+
+The terms "upper half" and "lower half" will be used to refer to the most significant 64 bits and least significant 64 bits of a 128-bit integer, respectively.
+
+By multiplying $a$ and $b$ using carry-less multiplication, we obtain a 128-bit result.
+We must reduce the upper half to a 64-bit result, which can then be XORed with the lower half to obtain the final result.
+
+This can be done by multiplying the upper half of the result by the irreducible polynomial.
+Then, the lower half of the result is the product reduced modulo the irreducible polynomial.
+
+To understand why this works, consider the process of reduction.
+The irreducible polynomial is aligned with each set bit in the upper half of the result, and XORed with the result.
+This is effectively what carry-less multiplication does.
+
+There is a complication, however.
+A third multiplication is required to ensure full reduction, as the highest bits of the upper half can affect the lowest bits of the upper half.
+
+For fields where $x^{n - 1} + 1$ is irreducible, two multiplications would suffice, but this is not the case for \GF{64}.
+
+For example, consider $x^{127} + x^{67} + x^{66} + x^{64}$.
+After aligning the irreducible polynomial with the highest bit and XORing, all bits in the upper half are zero.
+At this point, the reduction is complete and should stop.
+However, this is not how carry-less multiplication works.
+The irreducible polynomial will also be aligned with the other three bits, and the lower half is XORed with some unnecessary values.
+
+The upper half of the reduced result if and where this happened. A third multiplication will correct this.
+The unnecessary XORs are undone by XORing with the lower half of the third multiplication.
+
+The justification for the algorithm may seem somewhat complex, but the algorithm itself is very short, simple, and efficient.
+
+The functions $\text{upper}(x)$ and $\text{lower}(x)$ return the upper and lower 64 bits of the 128-bit integer $x$, respectively.
+
+\begin{algorithm}
+\caption{Carry-less Multiplication}
+\begin{algorithmic}
+\Function{Multiply}{$a, b$}
+\State $\text{result} \gets \text{CLMUL}(a, b)$
+\State $\text{result\_partially\_reduced} \gets \text{CLMUL}(\text{upper}(\text{result}), \text{POLYNOMIAL})$
+\State $\text{result\_fully\_reduced} \gets \text{CLMUL}(\text{upper}(\text{result\_partially\_reduced}), \text{POLYNOMIAL})$
+\State \Return $\text{lower}(\text{result}) \oplus \text{lower}(\text{result\_partially\_reduced}) \oplus \text{lower}(\text{result\_fully\_reduced})$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\section{Extended Euclidean Algorithm}
+
+The polynomial extended Euclidean algorithm, given polynomials $a$ and $b$, computes $s$ and $t$ such that $a \cdot s + b \cdot t = \text{gcd}(a, b)$.
+When $b$ is set to the irreducible polynomial, $t$ is the multiplicative inverse of $a$. $s$ does not need to be computed.
+
+The algorithm uses repeated Euclidean division.
+Because the irreducible polynomial is of degree 64, the first Euclidean division iteration, in the first iteration of the Euclidean algorithm, is a special case.
+As a 65-bit polynomial cannot fit in the 64-bit variable $b$, the first iteration is done manually, outside the loop.
+
+In the following pseudocode, $\text{leading\_zeros}(x)$ returns the number of leading zero bits in $x$.
+On modern CPUs, this function can be implemented using the \texttt{LZCNT} instruction.
+
+\begin{algorithm}
+\caption{Extended Euclidean Algorithm}
+\begin{algorithmic}
+\Function{ExtendedEuclidean}{$a$}
+
+\State $\text{assert}(a \neq 0)$
+
+\State \algorithmicif\ $a = 1$ \algorithmicthen\ \Return $1$ \algorithmicend \algorithmicif
+
+\State $t \gets 0$
+\State $\text{new\_t} \gets 1$
+\State $r \gets \text{POLYNOMIAL}$
+\State $\text{new\_r} \gets a$
+
+\State $r \gets r \oplus (\text{new\_r} \ll (\text{leading\_zeros}(\text{new\_r}) + 1))$
+\State $\text{quotient} \gets 1 \ll (\text{leading\_zeros}(\text{new\_r}) + 1)$
+
+\While{$\text{new\_r} \neq 0$}
+    \While{$\text{leading\_zeros}(\text{new\_r}) >= \text{leading\_zeros}(r)$}
+        \State $\text{degree\_diff} \gets \text{leading\_zeros}(\text{new\_r}) - \text{leading\_zeros}(r)$
+        \State $\text{r} \gets r \oplus (\text{new\_r} \ll \text{degree\_diff})$
+        \State $\text{quotient} \gets \text{quotient} | (1 \ll \text{degree\_diff})$
+    \EndWhile
+    \State $(r, \text{new\_r}) \gets (\text{new\_r}, r)$
+    \State $(t, \text{new\_t}) \gets (\text{new\_t}, t \oplus \text{gf64\_multiply}(\text{quotient}, \text{new\_t}))$
+    \State $quotient \gets 0$
+\EndWhile
+\State \Return $t$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
