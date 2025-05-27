@@ -230,6 +230,22 @@ pub mod tests {
         assert_eq!(GF64(1).invert(), GF64(1));
     }
 
+    fn invert_by_pow(mut x: GF64) -> GF64 {
+        // Raising to the power of 2^64 - 2 is a simple but inefficient way to invert in GF(2^64).
+        let mut result = GF64(1);
+        for _ in 0..63 {
+            x = x * x;
+            result *= x;
+        }
+        result
+    }
+
+    #[test]
+    fn inversion_agrees_with_invert_by_pow() {
+        let x = gf64();
+        assert_eq!(x.invert(), invert_by_pow(x));
+    }
+
     #[test]
     fn invert_many() {
         let mut values = gf64_array::<1000>();
