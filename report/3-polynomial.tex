@@ -14,9 +14,9 @@ To encode a $RS(n, k)$ code, where $n$ and $k$ are powers of two, the coefficien
 The elements of the basis are obtained by multiplying the polynomials $\hat{W}_0, \ldots, \hat{W}_{63}$, corresponding to the bits set in the index $i$: $X_i = \prod_{j \in \text{bits}(i)} \hat{W}_j$.
 
 $\hat{W}_i = W_i / W_i(2^{i})$ is a normalized vanishing polynomial of degree $2^{i}$, which vanishes (i.e. evaluates to zero) at the points $\omega_0, \omega_1, \ldots, \omega_{2^{i} - 1}$, and evaluates to $1$ at $\omega_{2^{i}}$.
-$W_i$ is the non-normalized polynomial obtained by multiplying the factors $(X - \omega_j)$ for $j = 0, \ldots, 2^{i} - 1$.
+$W_i$ is the non-normalized polynomial obtained by multiplying the factors $(X + \omega_j)$ for $j = 0, \ldots, 2^{i} - 1$.
 
-$W_i$ has degree $2^{i}$, as it is the product of $2^{i}$ degree one factors. Therefore, $X_i$ has degree $i$, since it the product of $W_i$ corresponding to the bits set in $i$.
+$W_i$ has degree $2^{i}$, as it is the product of $2^{i}$ degree one factors. Therefore, $X_i$ has degree $i$, since it the product of $W_j$ corresponding to the bits set in $i$.
 Since all $X_i$ in $\mathbb{X}$ have different degrees, they are linearly independent, so they form a valid basis which can represent all $2^{64}$ polynomials of degree at most $63$ in \GF{64}.
 
 All $W_i$ are linearized polynomials, which means that they only have coefficients at powers of $2$, i.e. $W_i = c_0 + c_1 X + c_2 X^2 + c_3 X^4 + \ldots + c_i X^{2^{i - 1}}$, and they are additive: $W_i(x + y) = W_i(x) + W_i(y)$.
@@ -64,7 +64,7 @@ The vectors can be stored interleaved in a single array, initialized to $[d_0, d
 
 See the butterfly diagram in \cite{novel-poly} for a visual representation of the algorithm.
 
-In total, $n - 1$ unique factors are needed, requiring evaluations of $W_0, \ldots, W_{log2(n) - 1}$. The coefficients of each $W_i$ can be computed in $O(2^i)$ time, so the factors can be computed in $O(n \log n)$ time.
+In total, $n - 1$ unique factors are needed - one evaluation of $\hat{W}_{log_2(n)}$, two of $\hat{W}_{log_2(n) - 1}$, \ldots, $n/2$ evaluations of $\hat{W}_0$ - which can be computed in $O(n \log n)$ time.
 
 The algorithms can be implemented iteratively as follows:
 
@@ -73,7 +73,7 @@ The algorithms can be implemented iteratively as follows:
     \begin{algorithmic}
         \Function{PrecomputeFactors}{\text{len}, \text{offset}}
             \State $\text{pow} \gets \log_2(\text{len})$
-            \State $\text{factors} \gets \text{new array of size } \text{len - 1}$
+            \State $\text{factors} \gets \text{new array of \GF{64} values of size } 2^{\text{pow} - 1}$
             \State $\text{factor\_idx} \gets 0$
             \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
                 \State $\text{groups} \gets 2^{\text{pow} - \text{step} - 1}$
@@ -99,8 +99,8 @@ The algorithms can be implemented iteratively as follows:
                         \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
                         \State $\text{data}[i] \gets \text{data}[i] + \text{data}[j] \cdot \text{factors}[\text{factors\_idx}]$
                     \EndFor
+                    \State $\text{factors\_idx} \gets \text{factors\_idx} + 1$
                 \EndFor
-                \State $\text{factors\_idx} \gets \text{factors\_idx} + 1$
             \EndFor
         \EndFunction
     \end{algorithmic}
@@ -109,17 +109,17 @@ The algorithms can be implemented iteratively as follows:
         \Function{ForwardTransform}{\text{data}, \text{factors}}
             \State $\text{pow} \gets \log_2(\text{len(data)})$
             \State $\text{factors\_idx} \gets \text{len(factors) - 1}$
-            \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
+            \For{$\text{step} \gets \text{pow} - 1 \text{ down to } 0$}
                 \State $\text{group\_len} \gets 2^{\text{step} + 1}$
-                \For{$\text{group} \gets 0 \text{ to } 2^{\text{pow} - \text{step} - 1} - 1$}
+                \For{$\text{group} \gets 2^{\text{pow} - \text{step} - 1} - 1 \text{ down to } 0$}
                     \For{$\text{x} \gets 0 \text{ to } \text{group\_len} / 2 - 1$}
                         \State $i \gets \text{group} \cdot \text{group\_len} + x$
                         \State $j \gets i + \text{group\_len} / 2$
                         \State $\text{data}[i] \gets \text{data}[i] + \text{factors}[\text{factors\_idx}] \cdot \text{data}[j]$
                         \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
                     \EndFor
+                    \State $\text{factors\_idx} \gets \text{factors\_idx} - 1$
                 \EndFor
-                \State $\text{factors\_idx} \gets \text{factors\_idx} - 1$
             \EndFor
         \EndFunction
     \end{algorithmic}
