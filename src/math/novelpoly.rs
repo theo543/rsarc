@@ -16,9 +16,29 @@ fn eval_vanishing_poly(x: GF64, j: u32) -> GF64 {
     result
 }
 
+fn get_normalization_factor(j: u32) -> GF64 {
+    //! Computes normalization factor 1 / W_j(ω_{2^j}) with internal caching.
+
+    use std::sync::{atomic::{AtomicU64, Ordering}, Mutex};
+    static CACHE: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
+    static COMPUTE_IN_PROGRESS: [Mutex<()>; 64] = [const { Mutex::new(()) }; 64];
+
+    let mut factor = CACHE[j as usize].load(Ordering::Relaxed);
+    if factor == 0 {
+        // lock prevents two threads computing same factor at the same time (which would waste CPU time)
+        let _lock = COMPUTE_IN_PROGRESS[j as usize].lock().unwrap();
+        factor = CACHE[j as usize].load(Ordering::SeqCst);
+        if factor == 0 {
+            factor = eval_vanishing_poly(GF64(1 << j), j).invert().0;
+            CACHE[j as usize].store(factor, Ordering::SeqCst);
+        }
+    }
+    GF64(factor)
+}
+
 fn eval_normalized_vanishing_poly(x: GF64, j: u32) -> GF64 {
     //! Normalized subspace vanishing polynomial evaluates to 1 at the point ω_{2^j}, which is helpful for the transform.
-    eval_vanishing_poly(x, j) / eval_vanishing_poly(GF64(1 << j), j)
+    eval_vanishing_poly(x, j) * get_normalization_factor(j)
 }
 
 pub struct TransformFactors {
@@ -96,7 +116,7 @@ pub fn precompute_derivative_factors(len: usize) -> DerivativeFactors {
         if l + 1 != len {
             factors[l + 1] = factors[l];
         }
-        factors[l] /= eval_vanishing_poly(GF64(1 << l), l as u32);
+        factors[l] *= get_normalization_factor(l as u32);
     }
     DerivativeFactors(factors)
 }
