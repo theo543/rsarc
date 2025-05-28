@@ -4,9 +4,6 @@
 
 The implementation can successfully generate parity data and repair file corruption using Reed-Solomon codes.
 
-The $\bigO(n^2)$ Newton interpolation algorithm is a significant issue for large files, as it prevents the use of small blocks for more granular error correction.
-Implementing a $\bigO(n \log n)$ algorithm is one main area for future improvement. \cite{6979016-novel-basis}
-
 The file metadata is currently not protected from corruption.
 This can be addressed by adding meta-parity blocks among the parity blocks.
 Although the metadata is generally small, this is a significant flaw in the current implementation.
@@ -19,6 +16,8 @@ Single-file archives would be less difficult to add.
 \pagebreak
 
 \section{Figures}
+
+% TODO: move this section to an annex
 
 As a final note, and to visually demonstrate some limitations of this error correction scheme,
 the following figures show the use of Reed-Solomon codes to repair bitmap images.

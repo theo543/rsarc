@@ -1,16 +1,11 @@
 \chapter{Finite Field Arithmetic}
 
-The constant $\text{POLYNOMIAL}$ referred to in pseudocode is the irreducible polynomial $x^{64} + x^4 + x^3 + x + 1$,
-with the coefficient $x^{64}$ omitted, as it does not fit in a 64-bit integer. \cite{low-weight-polynomials}
+As previously mentioned, Reed-Solomon codes require the use of non-standard arithmetic - arithmetic over finite fields - because modular arithmetic with a non-prime modulus does not have an inverse for all elements.
 
-As previously mentioned, Reed-Solomon codes require the use of non-standard arithmetic - arithmetic over finite fields.
-
-In modular arithmetic, a modular inverse exists only for elements that are coprime with the modulus, i.e. only multiplication by odd numbers is invertible modulo $2^n$.
-The field axioms require that all elements have a multiplicative inverse.
-
-Using \GF{64} arithmetic is necessary to resolve this issue, but complicates the arithmetic.
-Addition is extremely simple, as it is equivalent to XOR.
+Addition in \GF{64} is extremely simple, as it is equivalent to XOR.
 Multiplication, however, is less efficient than standard multiplication, and divison even less so.
+
+The constant $\text{POLYNOMIAL}$ refers to the irreducible polynomial $x^{64} + x^4 + x^3 + x + 1$, with $x^{64}$ omitted, as it would not fit in a 64-bit integer.
 
 \section{Russian Peasant Algorithm}
 
@@ -30,13 +25,11 @@ Then, moving on to the next coefficient of $b$, we divide $b$ by $x$ and multipl
 If the high bit of $a$ was set before shifting, $a$ is XORed with the irreducible polynomial.
 This is because, conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), which requires reduction, done by subtracting the irreducible polynomial using XOR.
 
-% pseudo code
 \begin{algorithm}
 \caption{Russian Peasant Multiplication}
 \begin{algorithmic}
 \Function{Multiply}{$a, b$}
 \State $acc \gets 0$
-% repeat 64 times
 \For{$\text{i} \gets 1 \text{ to } 64$}
     \If{$b \bitand 1$}
         \State $acc \gets acc \oplus a$
@@ -54,12 +47,12 @@ This is because, conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), 
 \end{algorithm}
 
 
-This algorithm is fairly simple and easy to implement, but multiplication can be done more efficiently on modern CPUs.
+This algorithm is fairly simple and easy to implement, but multiplication can be done more efficiently on modern CPUs with special instructions.
 Still, this algorithm is necessary as a fallback, for CPUs which don't support 128-bit carry-less multiplication.
 
-\section{Multiplication - Carry-less Multiplication}
+\section{Carry-less Multiplication}
 
-\GF{64} multiplication can be performed using only three 128-bit carry-less multiplication operations.
+\GF{64} multiplication can be performed using three 128-bit carry-less multiplication operations.
 Modern CPUs have support for this operation, as it is useful for cryptographic algorithms, computing checksums, and other applications. \cite{intel-clmul}
 
 The terms "upper half" and "lower half" will be used to refer to the most significant 64 bits and least significant 64 bits of a 128-bit integer, respectively.
@@ -77,20 +70,18 @@ This is effectively what carry-less multiplication does.
 There is a complication, however.
 A third multiplication is required to ensure full reduction, as the highest bits of the upper half can affect the lowest bits of the upper half.
 
-For fields where $x^{n - 1} + 1$ is irreducible, two multiplications would suffice, but this is not the case for \GF{64}.
-
 For example, consider $x^{127} + x^{67} + x^{66} + x^{64}$.
 After aligning the irreducible polynomial with the highest bit and XORing, all bits in the upper half are zero.
-At this point, the reduction is complete and should stop.
-However, this is not how carry-less multiplication works.
+At this point, the reduction is complete, but the multiplication does not know to stop here.
 The irreducible polynomial will also be aligned with the other three bits, and the lower half is XORed with some unnecessary values.
 
-The upper half of the reduced result if and where this happened. A third multiplication will correct this.
+The upper half of the reduced result indicates if and where this happened. A third multiplication is used to correct this.
 The unnecessary XORs are undone by XORing with the lower half of the third multiplication.
 
-The justification for the algorithm may seem somewhat complex, but the algorithm itself is very short, simple, and efficient.
+For fields where $x^{n} + 1$ is irreducible, the algorithm simplifies to carry-less multiplication followed by XORing the upper and lower halves of the result.
+This is the case for $x^{63} + 1$, but is unfortunately not the case for $x^{64} + 1$ \cite{low-weight-polynomials}.
 
-The functions $\text{upper}(x)$ and $\text{lower}(x)$ return the upper and lower 64 bits of the 128-bit integer $x$, respectively.
+The justification for the algorithm may seem somewhat complex, but the algorithm itself is very short, simple, and efficient.
 
 \begin{algorithm}
 \caption{Carry-less Multiplication}
@@ -114,7 +105,7 @@ Because the irreducible polynomial is of degree 64, the first Euclidean division
 As a 65-bit polynomial cannot fit in the 64-bit variable $b$, the first iteration is done manually, outside the loop.
 
 In the following pseudocode, $\text{leading\_zeros}(x)$ returns the number of leading zero bits in $x$.
-On modern CPUs, this function can be implemented using the \texttt{LZCNT} instruction.
+Modern CPUs have a dedicated instruction for counting leading zeros.
 
 \begin{algorithm}
 \caption{Extended Euclidean Algorithm}

@@ -1,52 +1,128 @@
-\chapter{Polynomial Interpolation and Evaluation}
+\chapter{Novel Polynomial Basis}
 
-\section{Horner's Rule}
+Standard algorithms for polynomial interpolation and evaluation, such as Newton interpolation and Horner's method, require $O(n^2)$ time.
+Efficient $O(n \log n)$ algorithms are used instead, based on FFT-like transforms introduced in \cite{novel-poly}.
 
-Horner's rule is a method for evaluating polynomials in $\bigO(n)$ time.
+\section{Polynomial Basis}
 
-A polynomial $a_0 + a_1 x + \ldots + a_{n-1} x^{n-1}$ can be written as $a_0 + x(a_1 + x(a_2 + \ldots + x(a_{n-1}) \ldots))$.
+The polynomial basis $\mathbb{X} = \{X_0, \ldots, X_{2^{64} - 1}\}$ admits transforms $\Psi_h^l$ and $(\Psi_h^l)^{-1}$ which convert between values at $h$ contiguous points with an arbitrary offset $l$ and coefficients in $\mathbb{X}$, requiring $h$ to be a power of 2.
+Both the forward and inverse transform can be computed in $O(n \log n)$ time.
 
-It can then be evaluated from the inside out, starting with the highest degree coefficient $a_{n-1}$,
-and repeatedly multiplying by $x$ and adding the next coefficient.
+Is it simple to oversample a polynomial using these transforms.
+To encode a $RS(n, k)$ code, where $n$ and $k$ are powers of two, the coefficients are obtained by applying the inverse transform to the input values with an offset of $0$, then additional values are obtained by computing the forward transform $n/k$ times at offsets $k, 2k, \ldots, n - k$.
 
-\section{Newton Interpolation}
+The elements of the basis are obtained by multiplying the polynomials $\hat{W}_0, \ldots, \hat{W}_{63}$, corresponding to the bits set in the index $i$: $X_i = \prod_{j \in \text{bits}(i)} \hat{W}_j$.
 
-Polynomial interpolation is used to find a polynomial of degree at most $k - 1$ that passes through $k$ points, where the x coordinates of the points are distinct.
-It is known that this polynomial is unique.
+$\hat{W}_i = W_i / W_i(2^{i})$ is a normalized vanishing polynomial of degree $2^{i}$, which vanishes (i.e. evaluates to zero) at the points $\omega_0, \omega_1, \ldots, \omega_{2^{i} - 1}$, and evaluates to $1$ at $\omega_{2^{i}}$.
+$W_i$ is the non-normalized polynomial obtained by multiplying the factors $(X - \omega_j)$ for $j = 0, \ldots, 2^{i} - 1$.
 
-Newton interpolation is the polynomial interpolation algorithm used in this project to interpolate data in $\bigO(n^2)$ time and $\bigO(n)$ space, where $n$ is the number of points.
+$W_i$ has degree $2^{i}$, as it is the product of $2^{i}$ degree one factors. Therefore, $X_i$ has degree $i$, since it the product of $W_i$ corresponding to the bits set in $i$.
+Since all $X_i$ in $\mathbb{X}$ have different degrees, they are linearly independent, so they form a valid basis which can represent all $2^{64}$ polynomials of degree at most $63$ in \GF{64}.
 
-The Newton interpolation polynomial is a linear combination of basis polynomials.
+All $W_i$ are linearized polynomials, which means that they only have coefficients at powers of $2$, i.e. $W_i = c_0 + c_1 X + c_2 X^2 + c_3 X^4 + \ldots + c_i X^{2^{i - 1}}$, and they are additive: $W_i(x + y) = W_i(x) + W_i(y)$.
 
-\begin{equation}
-    N(x) = \sum_{k=0}^{n} \;\; [y_0, \ldots, y_k] \cdot \prod_{i=0}^{k-1} (x - x_i)
-\end{equation}
+Note that the standard monomial basis $\{1, x, x^2, \ldots, x^{2^{64} - 1}\}$ could also be defined in a similar way, with $\hat{W}_i = X^{2^{i}}$, but $O(n \log n)$ transforms require the more complex basis $\mathbb{X}$.
 
-The notation $[y_k, \ldots, y_{k+j}]$ denotes the divided difference, which is recursively defined as follows:
+The structure of the basis allows for FFT-like recursive computation of the transforms.
 
-\begin{equation}
-    [y_k] = y_k
-\end{equation}
+\section{Forward and Inverse Transforms}
 
-\begin{equation}
-    [y_k, \ldots, y_{k+j}] = \frac{[y_{k+1}, \ldots, y_{k+j}] - [y_k, \ldots, y_{k+j-1}]}{x_{k+j} - x_k}
-\end{equation}
+Let $D_h$ be the data polynomial with $h$ coefficients $d_0, d_1, \ldots, d_{h - 1}$.
 
-Naive computation of divided differences requires $\bigO(n^2)$ time and space, but the space requirement can be reduced to $\bigO(n)$ by reusing values from previous iterations.
+It $D_h$ can be written as a recursive function $\Delta_i^m(x)$:
 
-At the initial iteration, the basis polynomial is initialized to $n_0(x) = 1$ and the list of divided differences is initialized to $[y_0]$.
+\[
+\Delta_i^m(x) = \begin{cases}
+    \Delta_{i+1}^m(x) + \hat{W}_i(x) \Delta_{i+1}^{m+2^i}(x) & 0 \leq i \le \log_2(h) \\
+    d_m & i = \log_2(h) \\
+    \end{cases}
+\]
 
-At any iteration $k + 1$, divided differences $[y_0, \ldots, y_k], [y_1, \ldots, y_k], \ldots, [y_{k-1}, y_k], [y_k]$ are known from previous iterations.
+At each step, the polynomial is split into coefficients whose index has the $i$-th bit set and those which don't. The final steps select the coefficient corresponding to the selected index $m$.
 
-The value $[y_{k+1}]$ is added to the list of divided differences, and the rest of the values are updated to
-$[y_0, \ldots, y_{k+1}], [y_1, \ldots, y_{k+1}], \ldots, [y_{k-1}, y_{k+1}], [y_k, y_{k+1}]$, from right to left.
-At every step of the update, the next divided difference is computed using the current value and the value to its right (which was updated in the previous step).
+Because of the properties of the normalized vanishing polynomials, the vector of evaluations of $\Delta_0^0$ can be computed from two vectors of size $h/2$: the evaluations of $\Delta_1^0$ and $\Delta_1^1$ at even points, which can further be split into smaller vectors.
 
-The basis polynomial is $n_{k+1}$ is computed by multiplying the previous basis polynomial by $x - x_k$.
+Let $\Phi(i, m, l) = [\Delta_i^m(\omega_c + \omega_l) \text{ for } c \text{ in } [0, 2^i, \ldots, h - 2^i]]$ be the vector of $n / 2^i$ evaluations of $\Delta_i^m$ at all points $\omega_c + \omega_l$ where $c$ has the $i$ most significant bits unset, with $l$ an arbitrary offset.
 
-The interpolation polynomial is updated by adding the basis polynomial multiplied by the divided difference to it.
+$\Phi(i, m, l)$ can be computed in $O(n)$ time from $\Phi(i + 1, m, l)$ and $\Phi(i + 1, m + 2^i, l)$.
 
-At each iteration, we perform multiplication by $x - x_k$, update the divided differences, and update the interpolation polynomial.
-Since these steps require $\bigO(k)$ time, and we perform $n$ iterations, the total time complexity is $\bigO(n^2)$.
+From each pair of values at indices $i$ from the two smaller vectors, the values at indices $2i$ and $2i + 1$ in the larger vector can be computed. The values will be denoted as $i$, $j$, $i'$, $j'$ for clarity.
 
-No general polynomial multiplication is required, nor is any polynomial division (only \GF{64} division in the divided differences).
+$i'$ is straightforwardly computed as: \[i' = \Delta_i^m(\omega_c + \omega_l) = \Delta_{i+1}^m(\omega_c + \omega_l) + \hat{W}_i(\omega_c + \omega_l) \Delta_{i+1}^{m + 2^i}(\omega_c + \omega_l) = i + \hat{W}_i(\omega_c + \omega_l) j\]
+
+The calculation of $j'$ relies on the properties of the vanishing polynomials: \[j' = \Delta_i^{m}(\omega_c + \omega_l + \omega_{2^i}) = \Delta_{i+1}^m(\omega_c + \omega_l + \omega_{2^i}) + \hat{W}_i(\omega_c + \omega_l + \omega_{2^i}) \Delta_{i+1}^{m + 2^i}(\omega_c + \omega_l + \omega_{2^i})\]
+
+The term $\omega_{2^i}$ vanishes in both $\Delta_{i+1}^m$ and $\Delta_{i+1}^{m + 2^i}$, since both contain only vanishing polynomials $W_j$ with $j \geq i + 1$.
+
+As $\hat{W}_i$ is normalized, $\hat{W}_i(\omega_c + \omega_l + \omega_{2^i}) = \hat{W}_i(\omega_c + \omega_l) + \hat{W}_i(\omega_{2^i}) = \hat{W}_i(\omega_c + \omega_l) + 1$.
+
+Therefore, $j'$ is computed as: \[j' = i + (\hat{W}_i(\omega_c + \omega_l) + 1) j = i + \hat{W}_i(\omega_c + \omega_l) j + j = i' + j\]
+
+The reverse calculation is also straightforward, and does not require division: \[j = j' + i' = (i' + j) + i' = j\] \[i = i' + \hat{W}_i(\omega_c + \omega_l) j = (i + \hat{W}_i(\omega_c + \omega_l) j) + \hat{W}_i(\omega_c + \omega_l) j = i\]
+
+The vectors can be stored interleaved in a single array, initialized to $[d_0, d_1, \ldots, d_{h - 1}]$ ($h$ single-element vectors), and then updated in-place in $log_2(h)$ steps, each step requiring $O(n)$ time.
+
+See the butterfly diagram in \cite{novel-poly} for a visual representation of the algorithm.
+
+In total, $n - 1$ unique factors are needed, requiring evaluations of $W_0, \ldots, W_{log2(n) - 1}$. The coefficients of each $W_i$ can be computed in $O(2^i)$ time, so the factors can be computed in $O(n \log n)$ time.
+
+The algorithms can be implemented iteratively as follows:
+
+\begin{algorithm}
+    \caption{Transform Algorithms}
+    \begin{algorithmic}
+        \Function{PrecomputeFactors}{\text{len}, \text{offset}}
+            \State $\text{pow} \gets \log_2(\text{len})$
+            \State $\text{factors} \gets \text{new array of size } \text{len - 1}$
+            \State $\text{factor\_idx} \gets 0$
+            \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
+                \State $\text{groups} \gets 2^{\text{pow} - \text{step} - 1}$
+                \For{$\text{group} \gets 0 \text{ to } \text{groups} - 1$}
+                    \State $\text{factors}[\text{factor\_idx}] \gets \hat{W}_{\text{step}}(\omega_{\text{group} \cdot 2^{\text{step} + 1}} + \omega_{\text{offset}})$
+                    \State $\text{factor\_idx} \gets \text{factor\_idx} + 1$
+                \EndFor
+            \EndFor
+            \State \Return $\text{factors}$
+        \EndFunction
+    \end{algorithmic}
+
+    \begin{algorithmic}
+        \Function{InverseTransform}{\text{data}, \text{factors}}
+            \State $\text{pow} \gets \log_2(\text{len(data)})$
+            \State $\text{factors\_idx} \gets 0$
+            \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
+                \State $\text{group\_len} \gets 2^{\text{step} + 1}$
+                \For{$\text{group} \gets 0 \text{ to } 2^{\text{pow} - \text{step} - 1} - 1$}
+                    \For{$\text{x} \gets 0 \text{ to } \text{group\_len} / 2 - 1$}
+                        \State $i \gets \text{group} \cdot \text{group\_len} + x$
+                        \State $j \gets i + \text{group\_len} / 2$
+                        \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
+                        \State $\text{data}[i] \gets \text{data}[i] + \text{data}[j] \cdot \text{factors}[\text{factors\_idx}]$
+                    \EndFor
+                \EndFor
+                \State $\text{factors\_idx} \gets \text{factors\_idx} + 1$
+            \EndFor
+        \EndFunction
+    \end{algorithmic}
+
+    \begin{algorithmic}
+        \Function{ForwardTransform}{\text{data}, \text{factors}}
+            \State $\text{pow} \gets \log_2(\text{len(data)})$
+            \State $\text{factors\_idx} \gets \text{len(factors) - 1}$
+            \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
+                \State $\text{group\_len} \gets 2^{\text{step} + 1}$
+                \For{$\text{group} \gets 0 \text{ to } 2^{\text{pow} - \text{step} - 1} - 1$}
+                    \For{$\text{x} \gets 0 \text{ to } \text{group\_len} / 2 - 1$}
+                        \State $i \gets \text{group} \cdot \text{group\_len} + x$
+                        \State $j \gets i + \text{group\_len} / 2$
+                        \State $\text{data}[i] \gets \text{data}[i] + \text{factors}[\text{factors\_idx}] \cdot \text{data}[j]$
+                        \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
+                    \EndFor
+                \EndFor
+                \State $\text{factors\_idx} \gets \text{factors\_idx} - 1$
+            \EndFor
+        \EndFunction
+    \end{algorithmic}
+\end{algorithm}
+
+% TODO: explain decoding algorithm which uses formal derivatives to recover polynomial from non-contiguous values

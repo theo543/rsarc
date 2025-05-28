@@ -3,21 +3,21 @@
 \begin{abstract}
 
 
-This project aims to implement file corruption repair using Reed-Solomon error-correcting codes.
-The code used is an erasure code over the field \GF{64}, implemented using Newton interpolation.
+The aim of this project to implement file corruption detection and repair using Reed-Solomon error-correcting codes.
+
+The code used is an erasure code over the field \GF{64}, implemented using \( O(n \log n) \) transforms in a polynomial basis introduced by Sian-Jheng Lin, Wei-Ho Chung, and Yunghsiang S. Han \cite{novel-poly}.
 
 Finite field multiplication is implemented using carry-less multiplication, and division is implemented using the extended Euclidean algorithm.
 
-The implementation is a CLI program that can generate parity data for a given file, and later detect and repair corruption.
+The implementation is a CLI program which can generate parity data for a file, and later detect and repair corruption in that file.
 
-The file is split into blocks, and an arbitrary number of parity blocks can be generated.
-Repair requires as many intact blocks as there were data blocks originally.
-Block corruption is detected using a hash.
+The file is split into $N$ blocks, and an arbitrary number of parity blocks $M$ can be generated, for a total of $N + M$ blocks.
+Any $N$ blocks are sufficient to recover the original data, so up to $M$ corrupted blocks can be repaired.
 
-The program processes multiple codes at once.
-This is necessary, as each code is spread across the file, which would cause a naive implementation to perform a system call for each symbol.
+As erasure codes require known error locations, a hash of each block is stored in the file header to detect corruption.
 
-Multithreading is used to speed up the polynomial interpolation and evaluation.
+The file is not a single Reed-Solomon code, as that would require reading the entire file into memory, limiting the maximum file size which can be processed.
+Instead, the file is interpreted as a matrix with $N + M$ rows, and each column is an separate Reed-Solomon code.
 
 \end{abstract}
 

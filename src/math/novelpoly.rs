@@ -1,10 +1,12 @@
 //! Implementation of algorithms from the paper "Novel Polynomial Basis and Its Application to Reed-Solomon Erasure Codes"
 
+// In the following comments, ω_i refers to the integer i interpreted as an element of GF(2^64), which in code would be `GF64(i)`.
+
 use super::gf64::{GF64, u64_as_gf64};
 
 fn eval_vanishing_poly(x: GF64, j: u32) -> GF64 {
-    //! The subspace vanishing polynomial W_j is zero for points in the subspace {F_0, F_1, ... F_{2^j - 1}}.
-    //! W_j(x) = x * (x + F_1) * ... (x + F_{2^j - 1})
+    //! The subspace vanishing polynomial W_j is zero for points in the subspace {ω_0, ω_1, ... ω_{2^j - 1}}.
+    //! W_j(x) = x * (x + ω_1) * ... (x + ω_{2^j - 1})
     //! Computing this is O(2^j). The maximum j used for encoding or decoding data of length n is log_2(n), so the complexity is at most O(n).
     assert!(j < 64);
     let mut result = GF64(1);
@@ -15,7 +17,7 @@ fn eval_vanishing_poly(x: GF64, j: u32) -> GF64 {
 }
 
 fn eval_normalized_vanishing_poly(x: GF64, j: u32) -> GF64 {
-    //! Normalized subspace vanishing polynomial evaluates to 1 at the point F_{2^j}, which is helpful for the transform.
+    //! Normalized subspace vanishing polynomial evaluates to 1 at the point ω_{2^j}, which is helpful for the transform.
     eval_vanishing_poly(x, j) / eval_vanishing_poly(GF64(1 << j), j)
 }
 
@@ -43,7 +45,7 @@ pub fn precompute_transform_factors(len: u64, offset: GF64) -> TransformFactors 
 }
 
 pub fn inverse_transform(data: &mut [GF64], &TransformFactors {pow, ref factors, ..}: &TransformFactors) {
-    //! Converts data from evaluations of a polynomial at points F_{0 + offset}, F_{1 + offset}, ..., F_{n - 1 + offset} to coefficients in the non-standard basis.
+    //! Converts data from evaluations of a polynomial at points ω_{0 + offset}, ω_{1 + offset}, ..., ω_{n - 1 + offset} to coefficients in the non-standard basis.
     assert_eq!(data.len(), 1 << pow);
     let mut factor_idx = 0;
     for step in 0..pow {
@@ -87,7 +89,7 @@ pub fn precompute_derivative_factors(len: usize) -> DerivativeFactors {
     assert!(len < 64);
     let mut factors = vec![GF64(1); len].into_boxed_slice();
     for l in 1..len {
-        // factors[l] = F_{1} * F_{2} * ... * F_{2^l - 1} / W_l(F_{2^l})
+        // factors[l] = ω_{1} * ω_{2} * ... * ω_{2^l - 1} / W_l(ω_{2^l})
         for j in (1 << (l - 1))..(1 << l) {
             factors[l] *= GF64(j);
         }

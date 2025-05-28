@@ -5,15 +5,12 @@
 Reed-Solomon codes are a well-known class of error-correcting codes used in a wide range of applications, from data storage to radio communication.
 They are based on polynomials over finite fields. \cite{theory-of-error-correcting-codes}
 
-The code used for this project is an erasure code over the field \GF{64}, implemented using Newton interpolation.
+The code used for this project is an erasure code over the field \GF{64}, implemented using $O(n \log n)$ algorithms introduced in \cite{novel-poly}.
 
-The fundamental principle of the code is to interpret the data as 64-bit values of a polynomial, use interpolation to obtain the coefficients of the polynomial,
-and then evaluate the polynomial at different x-values to obtain the encoded data.
+The basic working principle of this type of Reed-Solomon code is the interpretation of data as values of a polynomial evaluated at points ${\omega_0, \omega_1, \ldots, \omega_{k - 1}}$ in a finite field $\text{GF}(2^n)$.
+As there is only one polynomial of degree $k - 1$ or smaller passing through $k$ points, any combination of at least $k$ of the original and redundant points uniquely determines the original polynomial.
 
-The redundancy of the code comes from the fact that there is only one polynomial of degree at most $k - 1$ that passes through $k$ points.
-Any combination of at least $k$ the original and redundant values can be interpolated once again to obtain the same polynomial,
-and then evaluate it at the x-values of corrupted data to recover it.
-Any amount of redundancy can be added, up to the limit of the field size. As the chosen field is \GF{64}, the limit is effectively infinite.
+Any amount of redundancy can be added, limited only by the field size. As the chosen field is \GF{64}, the limit is effectively infinite.
 
 An erasure code is a type of error-correcting code which requires that the locations of corrupted data are known.
 The code cannot be used to discover the locations of corrupted data by itself.
@@ -26,15 +23,16 @@ The notation $\text{RS}(n, k)$ denotes a code with $n$ total symbols, with $k$ d
 The code used in this project has no fixed $n$ or $k$, they are specified by the user.
 
 The code used in this project is also systematic, meaning that the original data is included in the output.
-Other codes do not include the original data, and the receiver must decode the code to obtain the original data, even if no corruption occurred.
+Non-systematic codes do not include the original data, so the receiver must decode the code to obtain the original data, even if no corruption occurred.
 
 \section{Finite Fields}
 
-Finite fields, also known as Galois fields, are mathematical structures which define addition, multiplication, subtraction, and division over a finite set of elements. \cite{finite-fields-2nd-ed}
+Finite fields, also known as Galois fields, are mathematical structures which define addition, multiplication, subtraction, and division over a finite set of elements \cite{finite-fields-2nd-ed}
+(as opposed to the more commonly known infinite fields, such as the rationals, reals, and complex numbers).
 
 A field must satisfy the following properties:
 
-\begin{itemize}
+\begin{itemize}[nosep]
     \item Associativity of addition and multiplication: $(a + b) + c = a + (b + c)$ and $(a \cdot b) \cdot c = a \cdot (b \cdot c)$
     \item Commutativity of addition and multiplication: $a + b = b + a$ and $a \cdot b = b \cdot a$
     \item Additive and multiplicative identity elements: $a + 0 = a$ and $a \cdot 1 = a$
@@ -43,36 +41,35 @@ A field must satisfy the following properties:
     \item Distributivity of multiplication over addition: $a \cdot (b + c) = a \cdot b + a \cdot c$
 \end{itemize}
 
-Although the real numbers form a field, standard machine arithmetic as supported by most CPUs does not form a field.
-This is because multiplication is not always invertible. For example $0 \cdot 2 = 0$, but also $2^{n - 1} \cdot 2 = 0$ (because of overflow), where $n$ is the number of bits in the integer.
+The theorems of polynomial mathematics used in Reed-Solomon codes only hold in a field, however standard computer arithmetic does not form a field.
+Typical arithmetic supported natively by CPUs is fixed-size binary arithmetic with overflow, which is equivalent to arithmetic modulo a power of 2.
+Modular arithmetic only forms a field with a prime modulus, so it cannot be used directly for Reed-Solomon codes.
 
-The theorems of the polynomial mathematics used in Reed-Solomon codes require a field, so standard arithmetic cannot be used.
+For example, the operation $x * 2$ is not invertible, as it is equivalent to a left shift, from which the most significant bit of $x$ cannot be recovered.
 
-Fortunately, it is possible to define fields over integers of a fixed size, although the arithmetic is more complex.
-The size of the field must be either a prime number or a power of a prime number.
-In the case of machine arithmetic, the number of integers is a power of 2.
+Fortunately, it is possible to construct a field based on fixed-size integers, such as 64-bit integers.
 
-In a finite fields $\text{GF}(p^m)$, where $p$ is a prime number and $m$ is a positive integer, the elements are themselves polynomials of degree $m - 1$, with coefficients in $\text{GF}(p)$.
-So, for the $\text{GF}(2^n)$ case, an element in the field is interpreted as a polynomial with $n$ coefficients, where each coefficient is a bit (i.e. a value in $\text{GF}(2)$).
+In a finite field $\text{GF}(p^m)$, where $p$ is a prime number and $m$ is a positive integer, the elements are polynomials of degree $m - 1$, with coefficients in $\text{GF}(p)$.
+For the \GF{n} case, an element in the field is interpreted as a polynomial with $n$ coefficients, where each coefficient is a bit (i.e. a value in $\text{GF}(2)$ = $\{0, 1\}$).
 For the purposes of this project, $n$ is always 64, so the field is \GF{64}.
 
-It is important to note that these polynomials are not the same as the ones used in Reed-Solomon codes.
-Finite field polynomials are simply machine integers with more complex arithmetic. They are polynomials over $\text{GF}(2)$, with $64$ coefficients.
-Reed-Solomon polynomials can be arbitrarily long. They are polynomials over \GF{64}, with an arbitrary number of coefficients.
+The notation $\omega_i$ is used to denote the integer $i$ converted to an element of the field \GF{64} by interpreting its bits as a polynomial, which is a no-op in code, as elements of \GF{64} are stored as 64-bit integers.
 
-Addition is defined as polymial addition. As the coefficients are bits, this is equivalent to XOR.
-Additive inverse is a no-op, because XOR is its own inverse.
+It is important to note that these polynomials are not the same as the ones used in Reed-Solomon codes to represent data and parity information.
+Elements of \GF{n} are simply $n$ bit integers with more complex arithmetic. They are polynomials over $\text{GF}(2)$, with $n$ coefficients.
+Reed-Solomon polynomials can be arbitrarily long. They are polynomials over \GF{64}, with an arbitrary number of coefficients, and each coefficient is itself a polynomial over \GF{2} with $64$ coefficients.
 
-Multiplication is defined as polynomial multiplication, followed by reduction modulo an arbitrary irreducible polynomial of degree 64 (with $65$ coefficients, where the highest coefficient is $1$).
-Reduction is defined as the remainder of polynomial division by the irreducible polynomial.
+Finite field addition is defined as polynomial addition.
+In a general field $\text{GF}(p^m)$, this would be implemented as pairwise addition of the coefficients of two polynomials, modulo $p$.
 
-The choice of irreducible polynomial is arbitrary.
-There are public tables of irreducible polynomials available online, and the choice of polynomial does not affect correctness, as long as the encoder and decoder use the same polynomial.
-The chosen polynomial for this project is $x^{64} + x^4 + x^3 + x + 1$.
+In binary finite fields, addition is equivalent to XOR, as the coefficients are bits. Therefore, $x + x = 0$, and $x = -x$.
 
-Division is defined as multiplication by the multiplicative inverse.
+Multiplication is defined as polynomial multiplication, followed by reduction modulo an irreducible polynomial of degree 64 (with $65$ coefficients, where the highest coefficient is $1$).
 
-A simple way to compute the inverse is to raise the element to the power of $2^{64} - 2$ using exponentiation by squaring.
+The irreductible polynomial used for this project is $x^{64} + x^4 + x^3 + x + 1$ \cite{low-weight-polynomials}.
+The choice of irreducible polynomial does not affect correctness, and all possible fields corresponding to irreducible polynomials of degree 64 are isomorphic.
+
+A simple but inefficient way to compute the multiplicative inverse of $x$ is to compute $x^{2^{64} - 2}$ using exponentiation by squaring.
 In the early stages of this project, this was how the multiplicative inverse was calculated.
 
 The extended Euclidean algorithm is more efficient, and is used in the final implementation.
