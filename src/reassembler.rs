@@ -183,17 +183,17 @@ pub fn reassemble(data: &File, parity: &File, out_data: &mut File, out_parity: &
     let parity_map = unsafe { Mmap::map(parity)? };
 
     let Some(header) = header::read_header(parity_map.as_ref()) else {
-        return Err(io::Error::new(io::ErrorKind::Other, "Invalid header"));
+        return Err(io::Error::other("Invalid header"));
     };
 
     let hashes_bytes = (header.data_blocks + header.parity_blocks) * 40;
     if header::HEADER_LEN + hashes_bytes > parity_map.len() {
-        return Err(io::Error::new(io::ErrorKind::Other, "Metadata corrupted - file too short"));
+        return Err(io::Error::other("Metadata corrupted - file too short"));
     }
 
     let meta_hash = header::get_meta_hash(parity_map.as_ref());
     if meta_hash != *blake3::hash(&parity_map[header::HEADER_STRING.len() + blake3::OUT_LEN..header::HEADER_LEN + hashes_bytes]).as_bytes() {
-        return Err(io::Error::new(io::ErrorKind::Other, "Metadata corrupted - hash invalid"));
+        return Err(io::Error::other("Metadata corrupted - hash invalid"));
     }
 
     let (mut prefix, tiny_last_block) = prepare_lookup(header, &parity_map[header::HEADER_LEN..header::HEADER_LEN + hashes_bytes]);
