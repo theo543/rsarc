@@ -3,22 +3,48 @@
 \begin{abstract}
 
 
-The aim of this project to implement file corruption detection and repair using Reed-Solomon error-correcting codes.
+The aim of this project is to implement file corruption detection and repair using Reed-Solomon error-correcting codes.
 
-The code used is an erasure code over the field \GF{64}, implemented using \( O(n \log n) \) transforms in a polynomial basis introduced by Sian-Jheng Lin, Wei-Ho Chung, and Yunghsiang S. Han \cite{novel-poly}.
+The code used is an erasure code over the field \GF{64}, implemented using $O(n \log n)$ transforms in a polynomial basis introduced by Sian-Jheng Lin, Wei-Ho Chung, and Yunghsiang S. Han in \cite{novel-poly}.
 
 Finite field multiplication is implemented using carry-less multiplication, and division is implemented using the extended Euclidean algorithm.
 
-The implementation is a CLI program which can generate parity data for a file, and later detect and repair corruption in that file.
+The implementation is a command-line utility which can generate parity data for a file, and later detect and repair corruption in that file.
 
 The file is split into $N$ blocks, and an arbitrary number of parity blocks $M$ can be generated, for a total of $N + M$ blocks.
 Any $N$ blocks are sufficient to recover the original data, so up to $M$ corrupted blocks can be repaired.
 
-As erasure codes require known error locations, a hash of each block is stored in the file header to detect corruption.
+As erasure codes require known error locations - the term 'erasure' refers to an error at a known location - a hash of each block is stored in the file header to detect corruption.
 
 The file is not a single Reed-Solomon code, as that would require reading the entire file into memory, limiting the maximum file size which can be processed.
 Instead, the file is interpreted as a matrix with $N + M$ rows, and each column is an separate Reed-Solomon code.
 
 \end{abstract}
+
+\end{abstractpage}
+
+\begin{abstractpage}
+
+\begin{rezumat}
+
+\indent
+
+Acest proiect are ca scop implementarea detecției și reparării coruperii fișierelor folosind coduri Reed-Solomon de corectare a erorilor.
+
+Codul folosit este un cod de ștergere peste corpul \GF{64}, implementat folosind transformări în timp $O(n \log n)$ într-o bază polinomială introdusă de Sian-Jheng Lin, Wei-Ho Chung, și Yunghsiang S. Han în \cite{novel-poly}.
+
+Înmulțirea în corp finit este implementată folosind înmulțire fără retenție ('carry-less'), iar împărțirea este implementată folosind algoritmul extins al lui Euclid.
+
+Implementarea este un utilitar de linie de comandă care poate genera date de paritate pentru un fișier și, ulterior, să detecteze și repare corupție în fișier.
+
+Fișierul este împărțit în $N$ blocuri, și un număr arbitrar de blocuri de paritate $M$ pot fi generate, pentru un total de $N + M$ blocuri.
+Orice $N$ blocuri sunt suficiente pentru a recupera datele originale, deci cel mult $M$ blocuri corupte pot fi reparate.
+
+Deoarece un cod de ștergere necesită cunoașterea locațiilor erorilor - termenul 'ștergere' înseamnă o eroare la o locație cunoscută - un hash al fiecărui bloc este stocat în antetul fișierului pentru a detecta corupție.
+
+Fișierul nu este un singur cod Reed-Solomon, deoarece ar necesita citirea întregului fișier în memorie, limitând dimensiunea maximă de fișier care poate fi procesată.
+De fapt, fișierul este interpretat ca o matrice cu $N + M$ rânduri, iar fiecare coloană este un cod separat Reed-Solomon.
+
+\end{rezumat}
 
 \end{abstractpage}
