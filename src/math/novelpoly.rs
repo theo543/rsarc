@@ -69,14 +69,14 @@ pub fn inverse_transform(data: &mut [GF64], &TransformFactors {pow, ref factors,
     assert_eq!(data.len(), 1 << pow);
     let mut factor_idx = 0;
     for step in 0..pow {
-        let group_len = 1 << (step + 1);
+        let group_len = 1 << step;
         let groups = 1 << (pow - step - 1);
         for group in 0..groups {
-            for x in 0..group_len / 2 {
-                let i = (group * group_len + x) as usize;
-                let j = i + (group_len / 2) as usize;
-                data[j] += data[i]; // j = i' + j' = i' + i' + j = j
-                data[i] += data[j] * factors[factor_idx]; // i = i' + factor * j = i + factor * j + factor * j = i
+            for x in 0..group_len {
+                let a = (group * group_len * 2 + x) as usize;
+                let b = a + group_len as usize;
+                data[b] += data[a]; // b = a' + b' = a' + a' + b = b
+                data[a] += data[b] * factors[factor_idx]; // a = a' + factor * b = a + factor * b + factor * b = a
             }
             factor_idx += 1;
         }
@@ -88,14 +88,14 @@ pub fn forward_transform(data: &mut [GF64], &TransformFactors {pow, ref factors,
     assert_eq!(data.len(), 1 << pow);
     let mut factor_idx = factors.len();
     for step in (0..pow).rev() {
-        let group_len = 1 << (step + 1);
+        let group_len = 1 << step;
         let groups = 1 << (pow - step - 1);
         for group in (0..groups).rev() {
-            for x in 0..group_len / 2 {
-                let i = (group * group_len + x) as usize;
-                let j = i + (group_len / 2) as usize;
-                data[i] += factors[factor_idx - 1] * data[j]; // i' = i + factor * j
-                data[j] += data[i]; // j' = i + (factor + 1) * j = i + factor * j + j = i' + j
+            for x in 0..group_len {
+                let a = (group * group_len * 2 + x) as usize;
+                let b = a + group_len as usize;
+                data[a] += factors[factor_idx - 1] * data[b]; // a' = a + factor * b
+                data[b] += data[a]; // b' = a + (factor + 1) * b = a + factor * b + b = a' + b
             }
             factor_idx -= 1;
         }
