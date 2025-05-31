@@ -42,17 +42,14 @@ fn eval_normalized_vanishing_poly(x: GF64, j: u32) -> GF64 {
 }
 
 pub struct TransformFactors {
-    pow: u32,
     offset: GF64,
     factors: Box<[GF64]>,
 }
 
-pub fn precompute_transform_factors(len: u64, offset: GF64) -> TransformFactors {
+pub fn precompute_transform_factors(pow: u32, offset: GF64) -> TransformFactors {
     //! Precomputes twiddle factors used for the forward and inverse transforms.
     //! There are 1 + 2 + ... + n / 2 = n - 1 unique factors for a transform of size n.
-    assert!(len.is_power_of_two());
-    let pow = len.ilog2();
-    let mut factors = vec![GF64(0); (len - 1).try_into().unwrap()].into_boxed_slice();
+    let mut factors = vec![GF64(0); (1 << pow) - 1].into_boxed_slice();
     let mut factor_idx = 0;
     for step in 0..pow {
         let groups = 1 << (pow - step - 1);
@@ -61,52 +58,51 @@ pub fn precompute_transform_factors(len: u64, offset: GF64) -> TransformFactors 
             factor_idx += 1;
         }
     }
-    TransformFactors { pow, offset, factors }
+    TransformFactors { offset, factors }
 }
 
-pub fn inverse_transform(data: &mut [GF64], &TransformFactors {pow, ref factors, ..}: &TransformFactors) {
+pub fn inverse_transform(data: &mut [GF64], TransformFactors { factors, ..}: &TransformFactors) {
     //! Converts data from evaluations of a polynomial at points ω_{0 + offset}, ω_{1 + offset}, ..., ω_{n - 1 + offset} to coefficients in the non-standard basis.
-    assert_eq!(data.len(), 1 << pow);
-    let mut factor_idx = 0;
-    for step in 0..pow {
+    assert!(factors.len() + 1 >= data.len());
+    assert!(data.len().is_power_of_two());
+    for step in 0..data.len().ilog2() {
         let group_len = 1 << step;
-        let groups = 1 << (pow - step - 1);
-        for group in 0..groups {
+        let group_factors_start = ((1 << step) - 1) * ((factors.len() + 1) >> step);
+        for group in 0..data.len() >> (step + 1) {
             for x in 0..group_len {
-                let a = (group * group_len * 2 + x) as usize;
-                let b = a + group_len as usize;
+                let a = group * group_len * 2 + x;
+                let b = a + group_len;
                 data[b] += data[a]; // b = a' + b' = a' + a' + b = b
-                data[a] += data[b] * factors[factor_idx]; // a = a' + factor * b = a + factor * b + factor * b = a
+                data[a] += data[b] * factors[group_factors_start + group]; // a = a' + factor * b = a + factor * b + factor * b = a
             }
-            factor_idx += 1;
         }
     }
 }
 
-pub fn forward_transform(data: &mut [GF64], &TransformFactors {pow, ref factors, ..}: &TransformFactors) {
+pub fn forward_transform(data: &mut [GF64], TransformFactors { factors, ..}: &TransformFactors) {
     //! Converts data back from coefficients in the non-standard basis to evaluations.
-    assert_eq!(data.len(), 1 << pow);
-    let mut factor_idx = factors.len();
-    for step in (0..pow).rev() {
+    assert!(factors.len() + 1 >= data.len());
+    assert!(data.len().is_power_of_two());
+    for step in (0..data.len().ilog2()).rev() {
         let group_len = 1 << step;
-        let groups = 1 << (pow - step - 1);
-        for group in (0..groups).rev() {
+        let group_factors_start = ((1 << step) - 1) * ((factors.len() + 1) >> step);
+        for group in 0..data.len() >> (step + 1) {
             for x in 0..group_len {
-                let a = (group * group_len * 2 + x) as usize;
-                let b = a + group_len as usize;
-                data[a] += factors[factor_idx - 1] * data[b]; // a' = a + factor * b
+                let a = group * group_len * 2 + x;
+                let b = a + group_len;
+                data[a] += factors[group_factors_start + group] * data[b]; // a' = a + factor * b
                 data[b] += data[a]; // b' = a + (factor + 1) * b = a + factor * b + b = a' + b
             }
-            factor_idx -= 1;
         }
     }
 }
 
 pub struct DerivativeFactors(Box<[GF64]>);
 
-pub fn precompute_derivative_factors(len: usize) -> DerivativeFactors {
+pub fn precompute_derivative_factors(len: u32) -> DerivativeFactors {
     //! Precomputes factors needed for computing the formal derivative in the non-standard basis.
     assert!(len < 64);
+    let len = len as usize;
     let mut factors = vec![GF64(1); len].into_boxed_slice();
     for l in 1..len {
         // factors[l] = ω_{1} * ω_{2} * ... * ω_{2^l - 1} / W_l(ω_{2^l})
@@ -135,21 +131,16 @@ pub fn formal_derivative(data: &mut [GF64], DerivativeFactors(factors): &Derivat
     }
 }
 
-pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: &[TransformFactors], d_factors: &DerivativeFactors) -> (Vec<GF64>, Vec<GF64>) {
+pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: &TransformFactors, d_factors: &DerivativeFactors) -> (Vec<GF64>, Vec<GF64>) {
     //! Computes values of the error locator polynomial (x + e_0) * (x + e_1) * ... * (x + e_n) and values of the formal derivative in O(n log^2 n) time.
     assert!(!locations.is_empty());
     assert!(out_len >= locations.len());
     assert!(out_len.is_power_of_two());
-    assert_eq!(t_factors.len(), out_len.ilog2() as usize);
+    assert_eq!(t_factors.offset, GF64(0));
 
     let locations = u64_as_gf64(locations);
 
-    for (i, f) in t_factors.iter().rev().enumerate() {
-        assert_eq!(f.pow, i as u32 + 1);
-        assert_eq!(f.offset, GF64(0));
-    }
-
-    fn rec(locations: &[GF64], out_len: usize, factors: &[TransformFactors], depth: usize, out_values: Option<&mut Vec<GF64>>) -> Vec<GF64> {
+    fn rec(locations: &[GF64], out_len: usize, factors: &TransformFactors, out_values: Option<&mut Vec<GF64>>) -> Vec<GF64> {
         assert_ne!(locations.len(), 0);
         assert!(out_len > locations.len());
 
@@ -165,14 +156,14 @@ pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: 
         // In this case, splitting into two would cause locations.len() == out_len in one of the branches, so the extra value must be multiplied in later.
         let special_case = locations.len() + 1 == out_len;
 
-        let mut a = rec(&locations[..locations.len() / 2], out_len / 2, factors, depth + 1, None);
+        let mut a = rec(&locations[..locations.len() / 2], out_len / 2, factors, None);
         a.resize(out_len, GF64(0));
 
-        let mut b = rec(&locations[locations.len() / 2..locations.len() - special_case as usize], out_len / 2, factors, depth + 1, None);
+        let mut b = rec(&locations[locations.len() / 2..locations.len() - special_case as usize], out_len / 2, factors, None);
         b.resize(out_len, GF64(0));
 
-        forward_transform(&mut a, &factors[depth]);
-        forward_transform(&mut b, &factors[depth]);
+        forward_transform(&mut a, factors);
+        forward_transform(&mut b, factors);
 
         for (x, y) in a.iter_mut().zip(b.iter().copied()) {
             *x *= y;
@@ -190,12 +181,12 @@ pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: 
             *out_values = b;
         }
 
-        inverse_transform(&mut a, &factors[depth]);
+        inverse_transform(&mut a, factors);
         a
     }
 
     let mut values = vec![];
-    let mut coefficients = rec(locations, out_len, t_factors, 0, Some(&mut values));
+    let mut coefficients = rec(locations, out_len, t_factors, Some(&mut values));
     for c in &coefficients[locations.len() + 1..] {
         assert_eq!(*c, GF64(0));
     }
@@ -203,7 +194,7 @@ pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: 
 
     // Take derivative of coefficients and evaluate
     formal_derivative(&mut coefficients, d_factors);
-    forward_transform(&mut coefficients, &t_factors[0]);
+    forward_transform(&mut coefficients, t_factors);
 
     (values, coefficients)
 }
@@ -211,13 +202,18 @@ pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{math::gf64::tests::{gf64, gf64_array}, utils::IntoU64Ext};
+    use crate::math::gf64::tests::{gf64, gf64_array};
+
+    fn precompute_transform_factors(len: u32, offset: GF64) -> TransformFactors {
+        // Randomly increase the length to test that the transforms work with more factors than needed.
+        super::precompute_transform_factors(len + fastrand::u32(0..4), offset)
+    }
 
     #[test]
     fn roundtrip() {
         fn test<const N: usize>() {
             let offset = gf64();
-            let factors = precompute_transform_factors(N.as_u64(), offset);
+            let factors = precompute_transform_factors(N.ilog2(), offset);
             let data = gf64_array::<N>();
             let mut roundtripped = data;
             let mut roundtripped2 = data;
@@ -261,8 +257,8 @@ mod tests {
         let offset = gf64();
         let offset2 = gf64();
         let mut values: [GF64; 128] = eval(poly, offset);
-        inverse_transform(&mut values, &precompute_transform_factors(128, offset));
-        forward_transform(&mut values, &precompute_transform_factors(128, offset2));
+        inverse_transform(&mut values, &precompute_transform_factors(7, offset));
+        forward_transform(&mut values, &precompute_transform_factors(7, offset2));
         assert_eq!(values, eval(poly, offset2));
     }
 
@@ -271,7 +267,7 @@ mod tests {
         let poly = gf64_array::<128>();
         let offset = gf64();
         let mut values: [GF64; 512] = eval(poly, offset);
-        inverse_transform(&mut values, &precompute_transform_factors(512, offset));
+        inverse_transform(&mut values, &precompute_transform_factors(9, offset));
         assert_eq!(values[128..], [GF64(0); 512 - 128]);
     }
 
@@ -282,11 +278,11 @@ mod tests {
         let mut bigger = [GF64(0); 256];
         bigger[..128].copy_from_slice(&poly);
         bigger[128..].copy_from_slice(&poly);
-        let base_factors = precompute_transform_factors(128, offset);
+        let base_factors = precompute_transform_factors(8, offset);
         inverse_transform(&mut poly, &base_factors);
         inverse_transform(&mut bigger[128..], &base_factors);
-        forward_transform(&mut bigger[128..], &precompute_transform_factors(128, offset + GF64(128)));
-        inverse_transform(&mut bigger, &precompute_transform_factors(256, offset));
+        forward_transform(&mut bigger[128..], &precompute_transform_factors(7, offset + GF64(128)));
+        inverse_transform(&mut bigger, &base_factors);
         assert_eq!(bigger[..128], poly);
         assert_eq!(bigger[128..], [GF64(0); 128]);
     }
@@ -306,23 +302,22 @@ mod tests {
         let offset = gf64();
         let offset2 = gf64();
         let mut values: [GF64; 128] = eval(poly, offset);
-        inverse_transform(&mut values, &precompute_transform_factors(128, offset));
+        inverse_transform(&mut values, &precompute_transform_factors(7, offset));
         formal_derivative(&mut values, &precompute_derivative_factors(8));
-        forward_transform(&mut values, &precompute_transform_factors(128, offset2));
+        forward_transform(&mut values, &precompute_transform_factors(7, offset2));
         assert_eq!(values, eval(standard_formal_derivative(poly), offset2));
     }
 
     const N: usize = 512;
     const M: usize = 64;
-    const F: usize = N.ilog2() as usize;
     fn test_data_recovery(error_count: usize) {
 
         let mut errors: [u64; N] = std::array::from_fn(|i| i as u64);
         fastrand::shuffle(&mut errors);
 
-        let factors: [TransformFactors; F] = std::array::from_fn(|i| precompute_transform_factors(1 << (F - i), GF64(0)));
-        let d_factors = precompute_derivative_factors(F);
-        let (error_values, error_derivative_values) = compute_error_locator_poly(&errors[..error_count], N, &factors, &d_factors);
+        let t_factors = precompute_transform_factors(N.ilog2(), GF64(0));
+        let d_factors = precompute_derivative_factors(N.ilog2());
+        let (error_values, error_derivative_values) = compute_error_locator_poly(&errors[..error_count], N, &t_factors, &d_factors);
 
         let errors = || errors.iter().take(error_count).map(|e| *e as usize);
 
@@ -336,8 +331,8 @@ mod tests {
         for i in (M..N).step_by(M) {
             let slice = &mut encoded[i..i + M];
             slice.copy_from_slice(&data);
-            inverse_transform(slice, &factors[F - M.ilog2() as usize]);
-            forward_transform(slice, &precompute_transform_factors(M.as_u64(), GF64(i.as_u64())));
+            inverse_transform(slice, &t_factors);
+            forward_transform(slice, &precompute_transform_factors(M.ilog2(), GF64(i as u64)));
         }
         let backup = encoded;
 
@@ -352,9 +347,9 @@ mod tests {
         }
 
         // Take the derivative
-        inverse_transform(&mut encoded, &factors[0]);
+        inverse_transform(&mut encoded, &t_factors);
         formal_derivative(&mut encoded, &d_factors);
-        forward_transform(&mut encoded, &factors[0]);
+        forward_transform(&mut encoded, &t_factors);
 
         for e in errors() {
             // By the product rule, (f(x) * e(x))' = f'(x) * e(x) + f(x) * e'(x)
