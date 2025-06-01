@@ -2,7 +2,7 @@
 
 // In the following comments, ω_i refers to the integer i interpreted as an element of GF(2^64), which in code would be `GF64(i)`.
 
-use super::gf64::{GF64, u64_as_gf64};
+use super::gf64::GF64;
 
 fn eval_vanishing_poly(x: GF64, j: u32) -> GF64 {
     //! The subspace vanishing polynomial W_j is zero for points in the subspace {ω_0, ω_1, ... ω_{2^j - 1}}.
@@ -67,7 +67,7 @@ pub fn inverse_transform(data: &mut [GF64], TransformFactors { factors, ..}: &Tr
     assert!(data.len().is_power_of_two());
     for step in 0..data.len().ilog2() {
         let group_len = 1 << step;
-        let group_factors_start = ((1 << step) - 1) * ((factors.len() + 1) >> step);
+        let group_factors_start = factors.len() + 1 - ((factors.len() + 1) >> step);
         for group in 0..data.len() >> (step + 1) {
             for x in 0..group_len {
                 let a = group * group_len * 2 + x;
@@ -85,12 +85,12 @@ pub fn forward_transform(data: &mut [GF64], TransformFactors { factors, ..}: &Tr
     assert!(data.len().is_power_of_two());
     for step in (0..data.len().ilog2()).rev() {
         let group_len = 1 << step;
-        let group_factors_start = ((1 << step) - 1) * ((factors.len() + 1) >> step);
+        let group_factors_start = factors.len() + 1 - ((factors.len() + 1) >> step);
         for group in 0..data.len() >> (step + 1) {
             for x in 0..group_len {
                 let a = group * group_len * 2 + x;
                 let b = a + group_len;
-                data[a] += factors[group_factors_start + group] * data[b]; // a' = a + factor * b
+                data[a] += data[b] * factors[group_factors_start + group]; // a' = a + factor * b
                 data[b] += data[a]; // b' = a + (factor + 1) * b = a + factor * b + b = a' + b
             }
         }
@@ -99,17 +99,17 @@ pub fn forward_transform(data: &mut [GF64], TransformFactors { factors, ..}: &Tr
 
 pub struct DerivativeFactors(Box<[GF64]>);
 
-pub fn precompute_derivative_factors(len: u32) -> DerivativeFactors {
+pub fn precompute_derivative_factors(pow: u32) -> DerivativeFactors {
     //! Precomputes factors needed for computing the formal derivative in the non-standard basis.
-    assert!(len < 64);
-    let len = len as usize;
-    let mut factors = vec![GF64(1); len].into_boxed_slice();
-    for l in 1..len {
+    assert!(pow < 64);
+    let pow = pow as usize;
+    let mut factors = vec![GF64(1); pow].into_boxed_slice();
+    for l in 1..pow {
         // factors[l] = ω_{1} * ω_{2} * ... * ω_{2^l - 1} / W_l(ω_{2^l})
         for j in (1 << (l - 1))..(1 << l) {
             factors[l] *= GF64(j);
         }
-        if l + 1 != len {
+        if l + 1 != pow {
             factors[l + 1] = factors[l];
         }
         factors[l] *= get_normalization_factor(l as u32);
@@ -124,8 +124,11 @@ pub fn formal_derivative(data: &mut [GF64], DerivativeFactors(factors): &Derivat
     assert!(max_bit < factors.len() + 1);
     for i in 0..data.len() {
         // Iterate over bits in i
-        for (set_bit_idx, set_bit) in (0..=max_bit).map(|bit_idx| (bit_idx, 1 << bit_idx)).filter(|(_, bit)| i & bit != 0) {
-            data[i - set_bit] += data[i] * factors[set_bit_idx];
+        for bit_idx in 0..=max_bit {
+            let bit = 1 << bit_idx;
+            if i & bit != 0 {
+                data[i - bit] += data[i] * factors[bit_idx];
+            }
         }
         data[i] = GF64(0);
     }
@@ -138,42 +141,42 @@ pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: 
     assert!(out_len.is_power_of_two());
     assert_eq!(t_factors.offset, GF64(0));
 
-    let locations = u64_as_gf64(locations);
-
-    fn rec(locations: &[GF64], out_len: usize, factors: &TransformFactors, out_values: Option<&mut Vec<GF64>>) -> Vec<GF64> {
+    fn rec(locations: &[u64], out_len: usize, factors: &TransformFactors, out_values: Option<&mut Vec<GF64>>) -> Vec<GF64> {
         assert_ne!(locations.len(), 0);
         assert!(out_len > locations.len());
 
         if locations.len() == 1 {
             if let Some(out_values) = out_values {
-                *out_values = (0..out_len).map(|i| locations[0] + GF64(i as u64)).collect();
+                *out_values = (0..out_len as u64).map(|i| GF64(i) + GF64(locations[0])).collect();
             }
 
-            return [locations[0], GF64(1)].iter().copied().chain(std::iter::repeat_n(GF64(0), out_len - 2)).collect();
+            return [locations[0], 1].map(GF64).iter().copied().chain(std::iter::repeat_n(GF64(0), out_len - 2)).collect();
         }
 
         // When compute_error_locator_poly is called with locations.len() > out_len / 2, sometimes locations.len() + 1 will equal out_len.
         // In this case, splitting into two would cause locations.len() == out_len in one of the branches, so the extra value must be multiplied in later.
         let special_case = locations.len() + 1 == out_len;
 
-        let mut a = rec(&locations[..locations.len() / 2], out_len / 2, factors, None);
+        let (slice_a, slice_b) = locations.split_at(locations.len() / 2);
+
+        let mut a = rec(slice_a, out_len / 2, factors, None);
         a.resize(out_len, GF64(0));
-
-        let mut b = rec(&locations[locations.len() / 2..locations.len() - special_case as usize], out_len / 2, factors, None);
-        b.resize(out_len, GF64(0));
-
         forward_transform(&mut a, factors);
+
+        let mut b = rec(&slice_b[special_case as usize..], out_len / 2, factors, None);
+        b.resize(out_len, GF64(0));
         forward_transform(&mut b, factors);
 
+        // Multiply a by b to obtain the values of the requested polynomial.
         for (x, y) in a.iter_mut().zip(b.iter().copied()) {
             *x *= y;
-        }
+        };
 
         if special_case {
-            let extra_value = *locations.last().unwrap();
+            // Multiply a with the values of the extra monomial (x + slice_b[0]) which was not included in the second slice because of the special case.
             for (i, x) in a.iter_mut().enumerate() {
-                *x *= GF64(i as u64) + extra_value;
-            }
+                *x *= GF64(i as u64) + GF64(slice_b[0]);
+            };
         }
 
         if let Some(out_values) = out_values {
@@ -187,9 +190,6 @@ pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: 
 
     let mut values = vec![];
     let mut coefficients = rec(locations, out_len, t_factors, Some(&mut values));
-    for c in &coefficients[locations.len() + 1..] {
-        assert_eq!(*c, GF64(0));
-    }
     assert_eq!(values.len(), coefficients.len());
 
     // Take derivative of coefficients and evaluate

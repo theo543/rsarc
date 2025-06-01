@@ -63,18 +63,21 @@ The reverse calculation is also straightforward, and does not require division:
 
 The vectors can be stored interleaved in a single array, initialized to $[d_0, d_1, \ldots, d_{h - 1}]$ ($h$ single-element vectors), and then updated in-place in $log_2(h)$ steps, each step requiring $O(n)$ time.
 
-See the butterfly diagram in \cite{novel-poly} for a visual representation of the algorithm.
+See the butterfly diagram in \cite{novel-poly} for a visual representation of the transforms.
 
 In total, $n - 1$ unique factors are needed - one evaluation of $\hat{W}_{\log_2(n)}$, two of $\hat{W}_{\log_2(n) - 1}$, \ldots, $\frac{n}{2}$ evaluations of $\hat{W}_0$ - which can be computed in $O(n \log n)$ time.
 
-The algorithms can be implemented iteratively as follows:
+The inverse and forward transforms are almost identical, except the outer loop direction and the inner operations are reversed.
+
+\enlargethispage{\baselineskip} % squeeze the next line into the same page as the previous, since the transforms will completely fill the next page
+
+Notice the transforms can use factors of a greater power than needed. To compute multiple transforms of different sizes with the same offset, only the factors for the largest size must be computed, and can be used for all smaller sizes.
 
 \begin{algorithm}
     \caption{Transform Algorithms}
     \begin{algorithmic}
-        \Function{PrecomputeFactors}{\text{len}, \text{offset}}
-            \State $\text{pow} \gets \log_2(\text{len})$
-            \State $\text{factors} \gets \text{new array of \GF{64} values of size } \text{len} - 1$
+        \Function{PrecomputeFactors}{\text{pow}, \text{offset}}
+            \State $\text{factors} \gets \text{new array of \GF{64} values of size } 2^{\text{pow}} - 1$
             \State $\text{factor\_idx} \gets 0$
             \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
                 \State $\text{groups} \gets 2^{\text{pow} - \text{step} - 1}$
@@ -89,18 +92,16 @@ The algorithms can be implemented iteratively as follows:
 
     \begin{algorithmic}
         \Function{InverseTransform}{\text{data}, \text{factors}}
-            \State $\text{pow} \gets \log_2(\text{len(data)})$
-            \State $\text{factors\_idx} \gets 0$
-            \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
+            \For{$\text{step} \gets 0 \text{ to } \log_2(\text{len(data)}) - 1$}
                 \State $\text{group\_len} \gets 2^{\text{step}}$
-                \For{$\text{group} \gets 0 \text{ to } 2^{\text{pow} - \text{step} - 1} - 1$}
+                \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
+                \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
                     \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
                         \State $i \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
                         \State $j \gets i + \text{group\_len}$
                         \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
-                        \State $\text{data}[i] \gets \text{data}[i] + \text{data}[j] \cdot \text{factors}[\text{factors\_idx}]$
+                        \State $\text{data}[i] \gets \text{data}[i] + \text{data}[j] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
                     \EndFor
-                    \State $\text{factors\_idx} \gets \text{factors\_idx} + 1$
                 \EndFor
             \EndFor
         \EndFunction
@@ -108,18 +109,16 @@ The algorithms can be implemented iteratively as follows:
 
     \begin{algorithmic}
         \Function{ForwardTransform}{\text{data}, \text{factors}}
-            \State $\text{pow} \gets \log_2(\text{len(data)})$
-            \State $\text{factors\_idx} \gets \text{len(factors) - 1}$
-            \For{$\text{step} \gets \text{pow} - 1 \text{ down to } 0$}
+            \For{$\text{step} \gets \log_2(\text{len(data)}) - 1 \text{ down to } 0$}
                 \State $\text{group\_len} \gets 2^\text{step}$
-                \For{$\text{group} \gets 2^{\text{pow} - \text{step} - 1} - 1 \text{ down to } 0$}
+                \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
+                \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
                     \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
                         \State $i \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
                         \State $j \gets i + \text{group\_len}$
-                        \State $\text{data}[i] \gets \text{data}[i] + \text{factors}[\text{factors\_idx}] \cdot \text{data}[j]$
+                        \State $\text{data}[i] \gets \text{data}[i] + \text{data}[j] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
                         \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
                     \EndFor
-                    \State $\text{factors\_idx} \gets \text{factors\_idx} - 1$
                 \EndFor
             \EndFor
         \EndFunction
@@ -133,13 +132,12 @@ The error correction algorithm cannot directly use the inverse transform for int
 Instead, an algorithm based on the formal derivative is used which can recover the original polynomial from any $k$ intact points regardless of error location.
 
 In all fields, the formal derivative of a polynomial is well-defined and the standard power and product rules apply, despite the concepts of limits and continuity not existing in finite fields.
-
 \begin{gather*}
 (f \cdot g)' = f' \cdot g + f \cdot g'\\
 (\sum_{i = 0}^{n} a_i x^i)' = \sum_{i = 1}^{n} (i \cdot a_i) x^{i - 1}
 \end{gather*}
 
-The multiplication $i \cdot a_i$ between an integer and a field element is defined as repeated addition, which in \GF{n} is either zero or $a_i$, as the field has characteristic $2$ i.e. $a_i + a_i = 0\ \forall\ a_i \in \text{GF}(n)$.
+The multiplication $i \cdot a_i$ between an integer and a field element is defined as repeated addition, which in \GF{n} is either zero or $a_i$, as $a_i + a_i = 0$.
 \[
 i \cdot a_i =
     \begin{cases}
@@ -151,13 +149,13 @@ i \cdot a_i =
 Therefore, the formal derivative of a polynomial $f$ in \GF{n} written in the standard monomial basis is:
 \[f' = a_1 + a_3 x^2 + a_5 x^4 + \ldots\]
 
-As the normalized vanishing polynomial $\hat{W}_i$ are linearized, it only has coefficients at powers of two indices, so only the coefficient at $x^1 = x^{2^0}$ will be present in the derivative.
+As the normalized vanishing polynomial $\hat{W}_i$ only has coefficients at power-of-two indices, the derivative will be a constant:
 \[\hat{W}_i' = \frac{\prod_{j = 1}^{2^i - 1} \omega_j}{W_i(2^i)}\]
 
 To find the derivative of the basis polynomial $X_i$, which is a product of up to 64 polynomials, the product rule generalized to a product of $n$ polynomials is used:
 
 \[
-(\prod_{i = 0}^{n} f_i)' = \sum_{j = 0}^{n} f_j' \cdot \prod_{i \neq j} f_i
+(\prod_{i = 0}^{n} f_i)' = \sum_{j = 0}^{n} f_j' \cdot \prod_{i \neq j} f_j
 \]
 
 Therefore, the derivative of $X_i$ contains $|\text{bits}(i)|$ terms, each of which is a basis polynomial with one bit of $i$ unset, multiplied by the derivative of the vanishing polynomial corresponding to that bit:
@@ -171,13 +169,14 @@ Notice that $X_i'$ only has terms with indices less than $i$, so the derivative 
 \begin{algorithm}
     \caption{Polynomial Derivative}
     \begin{algorithmic}
-        \Function{PrecomputeDerivativeFactors}{\text{len}}
-            \State $\text{factors} \gets \text{new array of \GF{64} values of size } \text{len}$
-            \For{$l \gets 1 \text{ to } \text{len} - 1$}
+        \Function{PrecomputeDerivativeFactors}{\text{pow}}
+            \State $\text{assert} 0 \leq \text{pow} \le 64$
+            \State $\text{factors} \gets \text{new array of \GF{64} values of size } \text{pow}$
+            \For{$l \gets 1 \text{ to } \text{pow} - 1$}
                 \For{$j \gets 2^{l - 1} \text{ to } 2^l - 1$}
                     \State $\text{factors}[l] \gets \text{factors}[l] * \omega_j$
                 \EndFor
-                \If{$l + 1 \neq \text{len}$}
+                \If{$l + 1 \neq \text{pow}$}
                     \State $\text{factors}[l + 1] \gets \text{factors}[l]$
                 \EndIf
                 \State $\text{factors}[l] \gets \text{factors}[l] / W_l(2^l)$
@@ -187,10 +186,12 @@ Notice that $X_i'$ only has terms with indices less than $i$, so the derivative 
     \end{algorithmic}
     \begin{algorithmic}
         \Function{FormalDerivative}{\text{data}, \text{factors}}
-            \State $\text{max\_bit} \gets \log_2(\text{len(data)})$
             \For{$i \gets 0 \text{ to } \text{len(data) - 1}$}
-                \For{$\text{bit} \in \text{bits}(i)$}
-                    \State $\text{data}[i - 2^{\text{bit}}] \gets \text{data}[i] \cdot \text{factors}[\text{bit}]$
+                \For{$\text{bit} \gets 0 \text{ to } \log_2(\text{len(data)})$}
+                    %\State $\text{data}[i - 2^{\text{bit}}] \gets \text{data}[i] \cdot \text{factors}[\text{bit}]$
+                    \If{$i \bitand 2^{\text{bit}} \neq 0$}
+                        \State $\text{data}[i - 2^{\text{bit}}] \gets \text{data}[i - 2^{\text{bit}}] + \text{data}[i] \cdot \text{factors}[\text{bit}]$
+                    \EndIf
                 \EndFor
                 \State $\text{data}[i] \gets 0$
             \EndFor

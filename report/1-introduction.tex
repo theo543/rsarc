@@ -28,7 +28,7 @@ Non-systematic codes do not include the original data, so the receiver must deco
 \section{Finite Fields}
 
 Finite fields, also known as Galois fields, are mathematical structures which define addition, multiplication, subtraction, and division over a finite set of elements \cite{finite-fields-2nd-ed}
-(as opposed to the more commonly known infinite fields, such as the rationals, reals, and complex numbers).
+(as opposed to the better-known infinite fields, such as the rationals, reals, and complex numbers).
 
 A field must satisfy the following properties:
 
@@ -45,12 +45,12 @@ The theorems of polynomial mathematics used in Reed-Solomon codes only hold in a
 Typical arithmetic supported natively by CPUs is fixed-size binary arithmetic with overflow, which is equivalent to arithmetic modulo a power of 2.
 Modular arithmetic only forms a field with a prime modulus, so it cannot be used directly for Reed-Solomon codes.
 
-For example, the operation $x * 2$ is not invertible, as it is equivalent to a left shift, from which the most significant bit of $x$ cannot be recovered.
+For example, the operation $x \cdot 2$ is not invertible, as it is equivalent to a left shift, from which the most significant bit of $x$ cannot be recovered.
 
 Fortunately, it is possible to construct a field based on fixed-size integers, such as 64-bit integers.
 
 In a finite field $\text{GF}(p^m)$, where $p$ is a prime number and $m$ is a positive integer, the elements are polynomials of degree $m - 1$, with coefficients in $\text{GF}(p)$.
-For the \GF{n} case, an element in the field is interpreted as a polynomial with $n$ coefficients, where each coefficient is a bit (i.e. a value in $\text{GF}(2)$ = $\{0, 1\}$).
+For the \GF{n} case, an element in the field is a polynomial with $n$ coefficients, where each coefficient is a bit (i.e. a value in $\text{GF}(2)$ = $\{0, 1\}$).
 For the purposes of this project, $n$ is always 64, so the field is \GF{64}.
 
 The notation $\omega_i$ is used to denote the integer $i$ converted to an element of the field \GF{64} by interpreting its bits as a polynomial, which is a no-op in code, as elements of \GF{64} are stored as 64-bit integers.
@@ -62,14 +62,14 @@ Reed-Solomon polynomials can be arbitrarily long. They are polynomials over \GF{
 Finite field addition is defined as polynomial addition.
 In a general field $\text{GF}(p^m)$, this would be implemented as pairwise addition of the coefficients of two polynomials, modulo $p$.
 
-In binary finite fields, addition is equivalent to XOR, as the coefficients are bits. Therefore, $x + x = 0$, and $x = -x$.
+In binary finite fields, addition is equivalent to XOR, as the coefficients are bits. Therefore, $x + x = 0$, and $x = -x$ (the field has characteristic 2).
 
 Multiplication is defined as polynomial multiplication, followed by reduction modulo an irreducible polynomial of degree 64 (with $65$ coefficients, where the highest coefficient is $1$).
 
 The irreductible polynomial used for this project is $x^{64} + x^4 + x^3 + x + 1$ \cite{low-weight-polynomials}.
-The choice of irreducible polynomial does not affect correctness, and all possible fields corresponding to irreducible polynomials of degree 64 are isomorphic.
+The choice of irreducible polynomial does not affect correctness, and the fields obtained from different choices are isomorphic.
 
-A simple but inefficient way to compute the multiplicative inverse of $x$ is to compute $x^{2^{64} - 2}$ using exponentiation by squaring.
-In the early stages of this project, this was how the multiplicative inverse was calculated.
+
+A simple but inefficient formula for the multiplicative inverse, used in the early stages of this project, is $x^{-1} = x^{2^{64} - 2}$, computed using exponentiation by squaring.
 
 The extended Euclidean algorithm is more efficient, and is used in the final implementation.
