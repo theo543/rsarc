@@ -18,7 +18,7 @@ $\hat{W}_i = \frac{W_i}{W_i(2^{i})}$ is a normalized vanishing polynomial of deg
 $\hat{W}_i$ has degree $2^{i}$, as it is the product of $2^{i}$ degree one factors divided by a constant. Therefore, $X_i$ has degree $i$, since it the product of $W_j$ corresponding to the bits set in $i$.
 Since $\mathbb{X}$ contains $2^{64}$ polynomials with all degrees from $0$ to $2^{64} - 1$, it automatically is a valid basis for representing polynomials of degree up to $2^{64} - 1$.
 
-All $W_i$ are linearized polynomials, which means they only have non-zero coefficients at powers-of-two indices and are additive:
+All $W_i$ are linearized polynomials, which means they only have non-zero coefficients at power-of-two indices and are additive:
 \[W_i(x + y) = W_i(x) + W_i(y)\]
 
 Note that the standard monomial basis $\{1, x, x^2, \ldots, x^{2^{64} - 1}\}$ could also be defined in a similar way, with $\hat{W}_i = X^{2^{i}}$, but that would not allow $O(n \log n)$ FFT-like transforms.
@@ -97,10 +97,10 @@ Notice the transforms can use factors of a greater power than needed. To compute
                 \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
                 \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
                     \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
-                        \State $i \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
-                        \State $j \gets i + \text{group\_len}$
-                        \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
-                        \State $\text{data}[i] \gets \text{data}[i] + \text{data}[j] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
+                        \State $a \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
+                        \State $b \gets a + \text{group\_len}$
+                        \State $\text{data}[b] \gets \text{data}[b] + \text{data}[a]$
+                        \State $\text{data}[a] \gets \text{data}[a] + \text{data}[b] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
                     \EndFor
                 \EndFor
             \EndFor
@@ -114,10 +114,10 @@ Notice the transforms can use factors of a greater power than needed. To compute
                 \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
                 \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
                     \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
-                        \State $i \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
-                        \State $j \gets i + \text{group\_len}$
-                        \State $\text{data}[i] \gets \text{data}[i] + \text{data}[j] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
-                        \State $\text{data}[j] \gets \text{data}[j] + \text{data}[i]$
+                        \State $a \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
+                        \State $b \gets a + \text{group\_len}$
+                        \State $\text{data}[a] \gets \text{data}[a] + \text{data}[b] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
+                        \State $\text{data}[b] \gets \text{data}[b] + \text{data}[a]$
                     \EndFor
                 \EndFor
             \EndFor
@@ -170,7 +170,7 @@ Notice that $X_i'$ only has terms with indices less than $i$, so the derivative 
     \caption{Polynomial Derivative}
     \begin{algorithmic}
         \Function{PrecomputeDerivativeFactors}{\text{pow}}
-            \State $\text{assert} 0 \leq \text{pow} \le 64$
+            \State $\text{assert}\ 0 \leq \text{pow} \le 64$
             \State $\text{factors} \gets \text{new array of \GF{64} values of size } \text{pow}$
             \For{$l \gets 1 \text{ to } \text{pow} - 1$}
                 \For{$j \gets 2^{l - 1} \text{ to } 2^l - 1$}
@@ -206,9 +206,9 @@ In order to recover the original polynomial using the formal derivative, an erro
 Let $\text{ERASURES}$ be the set of indices where an error occurred. As previously mentioned, erasure codes require knowledge of the location of all errors, which, for this application, will be obtained using hashing.
 \[e = \prod_{i \in \text{ERASURES}} (x + \omega_i)\]
 
-Since $e$ does not depend on the actual values of the data polynomial, its values can be computed and multiplied with the received incomplete data polynomial $d$, since all unknown values will be zeroed.
+Since $e$ does not depend on the actual values of the data polynomial, its values can be computed and multiplied with the received incomplete data polynomial $d$, to zero out all unknown values.
 
-The known values in $e \cdot d$ will be changed unpredictably by the multiplication, however the product rule allows the original polynomial $d$ to be recovered:
+The product rule allows the original polynomial $d$ to be recovered:
 \begin{gather*}
 (e \cdot d)' = e' \cdot d + e \cdot d'\\
 (e \cdot d)'(\omega_x) = e'(\omega_x) \cdot d(\omega_x) + 0 \cdot d'(\omega_x)\ \forall\ x \in \text{ERASURES}\\
@@ -221,21 +221,70 @@ and finally dividing by the derivative of the error locator polynomial, at the e
 \begin{algorithm}
     \caption{Reed-Solomon Decoding}
     \begin{algorithmic}
-        \State $(e, e') \gets \text{values of error locator polynomial and its derivative}$
+        \State $\text{t\_fac} \gets \text{PrecomputeFactors}(\log_2(n), 0)$
+        \State $\text{d\_fac} \gets \text{PrecomputeDerivativeFactors}(\log_2(n))$
         \State $\text{d} \gets [d_0, d_1, \ldots, d_{n - 1}]$ \Comment{received data}
         \State $\text{erasures} \gets [i_0, i_1, \ldots, i_k]$ \Comment{indices of errors}
+        \State $(e, e') \gets \text{ComputeErrorLocator}(\text{erasures}, \text{t\_fac}, \text{d\_fac})$
         \State $\hat{d} \gets d \cdot e$ \Comment{multiply partially corrupt data by error locator polynomial}
-        \State $\hat{d'} \gets \text{ForwardTransform}(\text{FormalDerivative}(\text{InverseTransform}(\hat{d})))$
+        \State $\hat{d'} \gets \text{ForwardTransform}(\text{FormalDerivative}(\text{InverseTransform}(\hat{d}, \text{t\_fac}), \text{d\_fac}), \text{t\_fac})$
         \For{$i \in \text{erasures}$}
             \State $d[i] \gets \hat{d'}[i] / e'[i]$
         \EndFor
     \end{algorithmic}
 \end{algorithm}
 
+For this application, $(e, e')$ can be reused for the entire file, since all Reed-Solomon codes will have the same error locations - a missing block causes a missing value in all codes (remember the codes are 'columns' which span the entire file),
+and $e'$ can be inverted in advance to reduce the number of multiplicative inverse operations.
+
 \section{Error Locator Computation}
 
 A $O(n \log n)$ algorithm for computing the error locator polynomial is described in \cite{novel-poly} which uses fast Walsh-Hadamard transforms, however it requires $2^r$ operations where $r$ is the power of the field, so it is not useful for \GF{64}.
 
-Instead, I used a simpler $O(n \log^2 n)$ recursive algorithm which splits the polynomial into two halves, recursively computes the coefficients of each half, then multiplies the two halves in $O(n \log n)$ time using the inverse and forward transforms.
+Instead, I used a $O(n \log^2 n)$ recursive algorithm which splits the polynomial into two halves, and combines the two results by multiplying in $O(n \log n)$ time using the transforms.
 
-%TODO: Describe the algorithm in more detail
+\begin{algorithm}
+    \caption{Error Locator Polynomial Computation}
+    \begin{algorithmic}
+        \Function{ComputeErrorLocator}{\text{erasures}, \text{out\_len}, \text{t\_fac}, \text{d\_fac}}
+            \State $\text{values} \gets \text{new empty array}$
+            \State $\text{coefficients} \gets \text{InternalRecursion}(\text{erasures}, \text{out\_len}, \text{t\_fac}, \text{d\_fac}, \text{values})$
+            \State $\text{FormalDerivative}(\text{coefficients}, \text{d\_fac})$
+            \State $\text{ForwardTransform}(\text{coefficients}, \text{t\_fac})$
+            \State \Return $(\text{values},\ \text{coefficients})$ \Comment{coefficients now contains values of derivative}
+        \EndFunction
+        \Function{InternalRecursion}{\text{erasures}, \text{out\_len}, \text{t\_fac}, \text{out\_values}}
+            \If{$\text{len(erasures)} = 1$}
+                \If{$\text{out\_values} \neq \text{null}$}
+                    \State $\text{out\_values} \gets\ \text{new array}\ [\omega_i + \omega_{\text{erasures}[0]}\ \text{for}\ i\ \text{from}\ 0\ \text{to}\ \text{out\_len} - 1]$
+                \EndIf
+                \State $\Return\ \text{new array}\ [\omega_{\text{erasures}[0]}, 1, 0, \ldots, 0]\ \text{of size}\ \text{out\_len}$
+            \EndIf
+            \State $\text{special\_case} \gets \text{len(erasures) + 1} = \text{out\_len}$
+
+            \State $a \gets \text{InternalRecursion}(\text{erasures}\ \text{from 0 to}\ \frac{\text{len(erasures)}}{2} - 1 , \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
+            \State $\text{ResizeWithZeros}(a, \text{out\_len})$
+            \State $\text{ForwardTransform}(a, \text{t\_fac})$
+
+            \State $b \gets \text{InternalRecursion}(\text{erasures}\ \text{from}\ \frac{\text{len(erasures)}}{2} + \text{special\_case}\ \text{to end}, \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
+            \State $\text{ResizeWithZeros}(b, \text{out\_len})$
+            \State $\text{ForwardTransform}(b, \text{t\_fac})$
+
+            \State $a \gets a * b$ \Comment{polynomial evaluations are multiplied in $O(n)$ time}
+
+            \If{$\text{special\_case}$}
+                \State $a \gets a * [\omega_i + \omega_{\text{erasures}[\frac{\text{len(erasures)}}{2}]} \text{ for } i \text{ from } 0 \text{ to } \frac{\text{out\_len}}{2} - 1]$
+                \Comment{multiply in extra value}
+            \EndIf
+
+            \If{$\text{out\_values} \neq \text{null}$} \Comment{the top-most call must return both coefficients and values}
+                \State $\text{out\_values} \gets \text{Copy}(a)$ \Comment{the memory of $b$ can be reused here for the copy}
+            \EndIf
+
+            \State $\text{InverseTransform}(a, \text{t\_fac})$ \Comment{convert back to coefficients after multiplications are done}
+            \State \Return $a$
+        \EndFunction
+    \end{algorithmic}
+\end{algorithm}
+
+The special case is sometimes needed to prevent a branch where $\text{len(erasures)} = \text{out\_len}$, which would request only $n$ coefficients for a polynomial of degree $n$.
