@@ -46,6 +46,10 @@ pub struct TransformFactors {
     factors: Box<[GF64]>,
 }
 
+impl TransformFactors {
+    pub fn offset(&self) -> GF64 { self.offset }
+}
+
 pub fn precompute_transform_factors(pow: u32, offset: GF64) -> TransformFactors {
     //! Precomputes twiddle factors used for the forward and inverse transforms.
     //! There are 1 + 2 + ... + n / 2 = n - 1 unique factors for a transform of size n.

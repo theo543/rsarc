@@ -2,8 +2,10 @@
 
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
+use std::iter::StepBy;
+use std::ops::Range;
+use std::slice::Iter;
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, RwLock};
 use crossbeam_channel::{unbounded as channel, Sender, Receiver};
 
 use indicatif::ProgressBar;
@@ -13,8 +15,9 @@ use positioned_io::{RandomAccessFile, ReadAt};
 use crate::header::{format_header, set_meta_hash, Header, HEADER_LEN, HEADER_STRING};
 use crate::math::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
 use crate::math::polynomials::{evaluate_poly, newton_interpolation};
+use crate::math::novelpoly::{formal_derivative, forward_transform, inverse_transform, DerivativeFactors, TransformFactors};
 use crate::utils::progress::{progress_usize as progress, make_multiprogress};
-use crate::utils::IntoU64Ext;
+use crate::utils::{IntoU64Ext, IntoUSizeExt};
 
 // Data symbols from multiple codes are read in at once, to try to minimize read overhead
 // RwLock is only used as a thread-safe RefCell, not for blocking
@@ -33,40 +36,47 @@ fn u64_buf_as_u8(buf: &mut [u64]) -> &mut [u8] {
 }
 
 struct ReadDataMsg {
-    buf_rw: BigBuf,
+    buf: BigBuf,
     first_code: usize,
     codes: usize // last message may have less codes
 }
 
-// Position of blocks in file. Can be none, a range, or a list of indices.
-enum BlockIndices {
-    None,
-    Range{initial_idx: u64, exclusive_end_idx: u64, step: u64},
-    Some(Vec<u64>),
+// Iterator for position of blocks in file. Can be none, a range, or a list of indices.
+#[derive(Clone)]
+enum BlockIndices<'a> {
+    Empty,
+    Range(StepBy<Range<u64>>),
+    Slice(Iter<'a, u64>),
+    //Range{initial_idx: u64, exclusive_end_idx: u64, step: u64},
+    //Some(Vec<u64>),
 }
 
-fn iter_block_indices<F: FnMut(u64) -> io::Result<()>>(indices: &BlockIndices, mut f: F) -> io::Result<()> {
-    match indices {
-        BlockIndices::None => {},
-        BlockIndices::Range{initial_idx, exclusive_end_idx, step} => {
-            let mut i = *initial_idx;
-            while i < *exclusive_end_idx {
-                f(i)?;
-                i += *step;
-            }
-        },
-        BlockIndices::Some(v) => {
-            for i in v {
-                f(*i)?;
-            }
+impl Iterator for BlockIndices<'_> {
+    type Item = u64;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            BlockIndices::Empty => None,
+            BlockIndices::Range(iter) => iter.next(),
+            BlockIndices::Slice(iter) => iter.next().copied(),
         }
     }
-    Ok(())
 }
 
-fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: &BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
+impl From<StepBy<Range<u64>>> for BlockIndices<'_> {
+    fn from(iter: StepBy<Range<u64>>) -> Self {
+        BlockIndices::Range(iter)
+    }
+}
+
+impl<'a> From<Iter<'a, u64>> for BlockIndices<'a> {
+    fn from(iter: Iter<'a, u64>) -> Self {
+        BlockIndices::Slice(iter)
+    }
+}
+
+fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
     let mut incomplete_read_occurred = false;
-    iter_block_indices(indices, |base_file_idx| {
+    for base_file_idx in indices {
         let file_idx = base_file_idx + offset;
         if file_idx + symbols_bytes.as_u64() <= file_len {
             file.read_exact_at(file_idx, &mut buf[*buf_idx..*buf_idx + symbols_bytes])?;
@@ -83,8 +93,7 @@ fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, i
             }
         }
         *buf_idx += symbols_bytes;
-        Ok(())
-    })?;
+    }
     Ok(incomplete_read_occurred)
 }
 
@@ -99,10 +108,9 @@ fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>
     let output = RandomAccessFile::try_new(output.try_clone()?)?;
 
     for code_idx in (0..block_symbols).step_by(codes_per_full_read) {
-        let buf_rw = recv_buf.recv().unwrap();
-        let mut buf_guard = buf_rw.try_write().unwrap();
-        let buf = &mut *buf_guard;
-        let buf_u8 = u64_buf_as_u8(buf);
+        let buf = recv_buf.recv().unwrap();
+        let mut buf_lock = buf.try_write().unwrap();
+        let buf_u8 = u64_buf_as_u8(&mut buf_lock);
 
         let codes_in_read = codes_per_full_read.min(block_symbols - code_idx); // last read may be smaller
         let bytes_in_read = codes_in_read * 8;
@@ -110,17 +118,17 @@ fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>
         single_progress.reset();
         let mut buf_idx = 0;
         let offset = code_idx.as_u64() * 8;
-        read_symbols_from_file(&input, input_file_size, offset, &good_indices.0, bytes_in_read, &mut buf_idx, buf_u8)?;
-        let incomplete_output_read = read_symbols_from_file(&output, output_file_size, offset, &good_indices.1, bytes_in_read, &mut buf_idx, buf_u8)?;
+        read_symbols_from_file(&input, input_file_size, offset, good_indices.0.clone(), bytes_in_read, &mut buf_idx, buf_u8)?;
+        let incomplete_output_read = read_symbols_from_file(&output, output_file_size, offset, good_indices.1.clone(), bytes_in_read, &mut buf_idx, buf_u8)?;
         assert!(!incomplete_output_read, "output file contains only full blocks");
         single_progress.finish();
 
-        for x in buf.iter_mut() {
+        for x in buf_u8.iter_mut() {
             *x = x.to_le();
         }
 
-        drop(buf_guard);
-        send_buf.send(Some(ReadDataMsg{buf_rw, first_code: code_idx, codes: codes_in_read})).unwrap();
+        drop(buf_lock);
+        send_buf.send(Some(ReadDataMsg{buf, first_code: code_idx, codes: codes_in_read})).unwrap();
         progress.inc(codes_in_read.as_u64());
     }
 
@@ -129,7 +137,7 @@ fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>
 }
 
 struct ProcessTaskMsg {
-    buf_rw: BigBuf,
+    buf: BigBuf,
     reader_count: Arc<AtomicUsize>,
     offset: usize,
     code_idx: usize,
@@ -138,11 +146,102 @@ struct ProcessTaskMsg {
 
 // connects reader to processor worker threads
 fn read_to_processors(recv_data: &Receiver<Option<ReadDataMsg>>, to_processors: &Sender<Option<ProcessTaskMsg>>) {
-    while let Some(ReadDataMsg{buf_rw, first_code, codes}) = recv_data.recv().unwrap() {
+    while let Some(ReadDataMsg{buf, first_code, codes}) = recv_data.recv().unwrap() {
         let reader_count = Arc::new(AtomicUsize::new(codes));
         for offset in 0..codes {
-            to_processors.send(Some(ProcessTaskMsg{buf_rw: buf_rw.clone(), reader_count: reader_count.clone(), offset, code_idx: offset + first_code, codes})).unwrap();
+            to_processors.send(Some(ProcessTaskMsg{buf: buf.clone(), reader_count: reader_count.clone(), offset, code_idx: offset + first_code, codes})).unwrap();
         }
+    }
+}
+
+fn return_if_last(buf: BigBuf, reader_count: Arc<AtomicUsize>, return_data_buf: &Sender<BigBuf>) {
+    if reader_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+        assert!(buf.try_write().is_ok());
+        return_data_buf.send(buf).unwrap();
+    }
+}
+
+fn oversample(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
+              recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>,
+              data_symbols: usize, parity_symbols: usize,
+              factors: &[TransformFactors],
+              progress: &ProgressBar) {
+
+    assert_eq!(factors.len(), data_symbols.div_ceil(parity_symbols));
+    for (f, expected_offset) in factors.iter().zip((0..).step_by(data_symbols)) {
+        assert_eq!(f.offset().0, expected_offset);
+    }
+
+    let mut memory = vec![GF64(0); data_symbols];
+
+    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
+        for (x, m) in buf.try_read().unwrap()[offset..].iter().step_by(codes).copied().map(GF64).zip(memory.iter_mut()) {
+            *m = x;
+        }
+        return_if_last(buf, reader_count, return_data_buf);
+
+        inverse_transform(&mut memory, &factors[0]);
+
+        let mut parity_buf = recv_parity_buf.recv().unwrap();
+        assert_eq!(parity_buf.len(), parity_symbols);
+
+        let mut iter = u64_as_gf64_mut(&mut parity_buf).chunks_exact_mut(data_symbols);
+        assert_eq!(iter.len(), factors.len() - 1);
+        for (chunk, chunk_factors) in (&mut iter).zip(&factors[1..]) {
+            chunk.copy_from_slice(&memory);
+            forward_transform(chunk, chunk_factors);
+        }
+
+        let last = iter.into_remainder();
+        forward_transform(&mut memory, factors.last().unwrap());
+        last.copy_from_slice(&memory[..last.len()]);
+
+        send_parity.send(Some((parity_buf, code_idx))).unwrap();
+        progress.inc(1);
+    }
+}
+
+fn recovery(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
+            recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>,
+            data_symbols: usize, parity_symbols: usize,
+            t_factors: &TransformFactors,
+            d_factors: &DerivativeFactors,
+            error_indices: &[usize], valid_indices: &[usize],
+            err_locator_values: &[GF64], err_locator_derivative_inverses: &[GF64],
+            progress: &ProgressBar) {
+
+    assert_eq!(error_indices.len(), err_locator_values.len());
+    assert_eq!(valid_indices.len(), err_locator_derivative_inverses.len());
+
+    let mut memory = vec![GF64(0); data_symbols + parity_symbols];
+
+    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
+        let locked_buf = buf.try_read().unwrap();
+        let block_iter = u64_as_gf64(&locked_buf)[offset..].iter().step_by(codes).copied();
+        assert_eq!(block_iter.len(), valid_indices.len());
+        assert_eq!(block_iter.len(), err_locator_values.len());
+        for ((x, i), e) in block_iter.zip(valid_indices.iter().copied()).zip(err_locator_values.iter().copied()) {
+            // Extract block values from buffer of interleaved blocks and multiply by error locator
+            memory[i] = x * e;
+        }
+        for i in error_indices.iter().copied() {
+            memory[i] = GF64(0);
+        }
+        drop(locked_buf);
+        return_if_last(buf, reader_count, return_data_buf);
+
+        inverse_transform(&mut memory, t_factors);
+        formal_derivative(&mut memory, d_factors);
+        forward_transform(&mut memory, t_factors);
+
+        let mut recovered_data_buf = recv_parity_buf.recv().unwrap(); // TODO: rename parity to 'output' or 'recovered' or something
+        assert_eq!(recovered_data_buf.len(), error_indices.len());
+        assert_eq!(recovered_data_buf.len(), err_locator_derivative_inverses.len());
+        for ((x, i), inverse) in u64_as_gf64_mut(&mut recovered_data_buf).iter_mut().zip(error_indices.iter().copied()).zip(err_locator_derivative_inverses.iter().copied()) {
+            *x = memory[i] * inverse;
+        }
+        send_parity.send(Some((recovered_data_buf, code_idx))).unwrap();
+        progress.inc(1);
     }
 }
 
@@ -157,14 +256,14 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
 
     let block_x_values = block_x_values.as_ref().map(|x| u64_as_gf64(x.as_slice()));
 
-    while let Some(ProcessTaskMsg{buf_rw, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
-        let locked_buf = buf_rw.try_read().unwrap();
+    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
+        let locked_buf = buf.try_read().unwrap();
         newton_interpolation(u64_as_gf64(&locked_buf[0..codes * data_blocks]), offset, codes, block_x_values, poly, memory);
         drop(locked_buf);
-        let is_last = reader_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1;
+        let is_last = reader_count.fetch_sub(1, Ordering::SeqCst) == 1;
         if is_last {
-            assert!(buf_rw.try_write().is_ok());
-            return_data_buf.send(buf_rw).unwrap();
+            assert!(buf.try_write().is_ok());
+            return_data_buf.send(buf).unwrap();
         }
         let mut parity_buf = recv_parity_buf.recv().unwrap();
         assert_eq!(parity_buf.len(), parity_blocks);
@@ -182,13 +281,6 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
     }
 }
 
-fn iter_block_indices_usize<F: FnMut(usize) -> io::Result<()>>(indices: &BlockIndices, mut f: F) {
-    iter_block_indices(indices, |x| {
-        let x = usize::try_from(x).expect("block index must fit in usize (32-bit system?)");
-        f(x)
-    }).unwrap();
-}
-
 fn write_data(recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &Sender<Buf>,
               mapped_input: &mut [u8], mapped_output: &mut [u8],
               output_blocks: usize, output_indices: (BlockIndices, BlockIndices),
@@ -200,22 +292,20 @@ fn write_data(recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &
 
         let offset = code_index * 8;
         let mut parity_idx = 0;
-        iter_block_indices_usize(&output_indices.0, |base_file_idx| {
-            let file_idx = base_file_idx + offset;
+        for base_file_idx in output_indices.0.clone() {
+            let file_idx = base_file_idx.as_usize() + offset;
             if file_idx + 8 <= mapped_input.len() {
                 mapped_input[file_idx..file_idx + 8].copy_from_slice(&parity[parity_idx].to_le_bytes());
             } else {
                 assert_eq!(parity[parity_idx], 0, "values outside the file must be zero");
             }
             parity_idx += 1;
-            Ok(())
-        });
-        iter_block_indices_usize(&output_indices.1, |base_file_idx| {
-            let file_idx = base_file_idx + offset;
+        };
+        for base_file_idx in output_indices.1.clone() {
+            let file_idx = base_file_idx.as_usize() + offset;
             mapped_output[file_idx..file_idx + 8].copy_from_slice(&parity[parity_idx].to_le_bytes());
             parity_idx += 1;
-            Ok(())
-        });
+        };
         
         return_parity_buf.send(parity).unwrap();
         progress.inc(1);
@@ -368,8 +458,8 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
     internal_encode_pipeline(
         input, output, input_file_len, output_file_len,
         data_blocks, opt.parity_blocks, block_symbols,
-        (BlockIndices::Range{initial_idx: 0, exclusive_end_idx: input_file_len, step: opt.block_bytes.as_u64()}, BlockIndices::None),
-        (BlockIndices::None, BlockIndices::Range{initial_idx: 0, exclusive_end_idx: parity_blocks_bytes.as_u64(), step: opt.block_bytes.as_u64()}),
+        ((0..data_blocks.as_u64()).step_by(opt.block_bytes).into(), BlockIndices::Empty),
+        (BlockIndices::Empty, (0..opt.parity_blocks.as_u64()).step_by(opt.block_bytes).into()),
         None, None,
         &mut [], parity_map,
     )?;
@@ -478,8 +568,8 @@ pub fn repair(input: &mut File, output: &mut File, header: Header, input_corrupt
     internal_encode_pipeline(
         input, output, input_len, output_len,
         good_blocks, bad_blocks, block_symbols,
-        (BlockIndices::Some(good_input_blocks), BlockIndices::Some(good_output_blocks)),
-        (BlockIndices::Some(bad_input_blocks), BlockIndices::Some(bad_output_blocks)),
+        (good_input_blocks.iter().into(), good_output_blocks.iter().into()),
+        (bad_input_blocks.iter().into(), bad_output_blocks.iter().into()),
         Some(input_x_values), Some(output_x_values),
         &mut input_map, &mut output_map,
     )?;
