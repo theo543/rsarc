@@ -508,6 +508,10 @@ fn collect_good_indices(corrupt: &[u64], len: usize) -> Vec<u64> {
     for idx in 0..len.as_u64() {
         if corrupt[corrupt_idx] == idx {
             corrupt_idx += 1;
+            if corrupt_idx == corrupt.len() {
+                good_indices.extend(idx + 1..len.as_u64());
+                break;
+            }
         } else {
             good_indices.push(idx);
         }
