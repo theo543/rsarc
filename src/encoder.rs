@@ -6,7 +6,7 @@ use std::iter::StepBy;
 use std::ops::Range;
 use std::slice::Iter;
 use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, RwLock};
-use crossbeam_channel::{unbounded as channel, Sender, Receiver};
+use crossbeam_channel::{unbounded, Sender, Receiver};
 
 use indicatif::ProgressBar;
 use memmap2::MmapOptions;
@@ -15,9 +15,9 @@ use positioned_io::{RandomAccessFile, ReadAt};
 use crate::header::{format_header, set_meta_hash, Header, HEADER_LEN, HEADER_STRING};
 use crate::math::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
 use crate::math::polynomials::{evaluate_poly, newton_interpolation};
-use crate::math::novelpoly::{formal_derivative, forward_transform, inverse_transform, DerivativeFactors, TransformFactors};
+use crate::math::novelpoly::{formal_derivative, forward_transform, inverse_transform, precompute_transform_factors, DerivativeFactors, TransformFactors};
 use crate::utils::progress::{progress_usize as progress, make_multiprogress, IncIfNotFinished};
-use crate::utils::{IntoU64Ext, IntoUSizeExt};
+use crate::utils::{get_available_memory, IntoU64Ext, IntoUSizeExt, ZipEqExt};
 
 // Data symbols from multiple codes are read in at once, to try to minimize read overhead
 // RwLock is only used as a thread-safe RefCell, not for blocking
@@ -41,40 +41,10 @@ struct ReadDataMsg {
     codes: usize // last message may have less codes
 }
 
-// Iterator for position of blocks in file. Can be none, a range, or a list of indices.
-#[derive(Clone)]
-enum BlockIndices<'a> {
-    Empty,
-    Range(StepBy<Range<u64>>),
-    Slice(Iter<'a, u64>),
-    //Range{initial_idx: u64, exclusive_end_idx: u64, step: u64},
-    //Some(Vec<u64>),
-}
+trait BlockIndices: ExactSizeIterator<Item = u64> + Send + Clone {}
+impl<T: ExactSizeIterator<Item = u64> + Send + Clone> BlockIndices for T {}
 
-impl Iterator for BlockIndices<'_> {
-    type Item = u64;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            BlockIndices::Empty => None,
-            BlockIndices::Range(iter) => iter.next(),
-            BlockIndices::Slice(iter) => iter.next().copied(),
-        }
-    }
-}
-
-impl From<StepBy<Range<u64>>> for BlockIndices<'_> {
-    fn from(iter: StepBy<Range<u64>>) -> Self {
-        BlockIndices::Range(iter)
-    }
-}
-
-impl<'a> From<Iter<'a, u64>> for BlockIndices<'a> {
-    fn from(iter: Iter<'a, u64>) -> Self {
-        BlockIndices::Slice(iter)
-    }
-}
-
-fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
+fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: impl BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
     let mut incomplete_read_occurred = false;
     for base_file_idx in indices {
         let file_idx = base_file_idx + offset;
@@ -100,10 +70,11 @@ fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, i
 fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>,
              block_symbols: usize, codes_per_full_read: usize,
              input: &mut File, output: &mut File,
-             input_file_size: u64, output_file_size: u64,
-             good_indices: (BlockIndices, BlockIndices),
+             good_indices: (impl BlockIndices, impl BlockIndices),
              progress: &ProgressBar, single_progress: &ProgressBar) -> io::Result<()> {
 
+    let input_file_size = input.metadata()?.len();
+    let output_file_size = output.metadata()?.len();
     let input = RandomAccessFile::try_new(input.try_clone()?)?;
     let output = RandomAccessFile::try_new(output.try_clone()?)?;
 
@@ -161,33 +132,38 @@ fn return_if_last(buf: BigBuf, reader_count: Arc<AtomicUsize>, return_data_buf: 
     }
 }
 
-fn oversample(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
-              recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>,
-              data_symbols: usize, parity_symbols: usize,
+struct WorkerChans<'a> {
+    recv_result_buf: &'a Receiver<Buf>,
+    send_result: &'a Sender<Option<(Buf, usize)>>,
+    recv_data: &'a Receiver<Option<ProcessTaskMsg>>,
+    return_data_buf: &'a Sender<BigBuf>,
+}
+
+fn oversample(chans: WorkerChans,
+              data_symbols: usize, padded_data_symbols: usize,
               factors: &[TransformFactors],
               progress: &ProgressBar) {
 
-    assert_eq!(factors.len(), data_symbols.div_ceil(parity_symbols));
-    for (f, expected_offset) in factors.iter().zip((0..).step_by(data_symbols)) {
+    for (f, expected_offset) in factors.iter().zip((0..).step_by(padded_data_symbols)) {
         assert_eq!(f.offset().0, expected_offset);
     }
 
-    let mut memory = vec![GF64(0); data_symbols];
+    let mut memory = vec![GF64(0); padded_data_symbols];
 
-    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
-        for (x, m) in buf.try_read().unwrap()[offset..].iter().step_by(codes).copied().map(GF64).zip(memory.iter_mut()) {
-            *m = x;
+    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = chans.recv_data.recv().unwrap() {
+        for (x, m) in buf.try_read().unwrap()[offset..codes * data_symbols].iter().step_by(codes).zip_eq(&mut memory[..data_symbols]) {
+            *m = GF64(*x);
         }
-        return_if_last(buf, reader_count, return_data_buf);
+        return_if_last(buf, reader_count, chans.return_data_buf);
 
+        memory[data_symbols..].fill(GF64(0));
         inverse_transform(&mut memory, &factors[0]);
 
-        let mut parity_buf = recv_parity_buf.recv().unwrap();
-        assert_eq!(parity_buf.len(), parity_symbols);
+        let mut parity_buf = chans.recv_result_buf.recv().unwrap();
 
-        let mut iter = u64_as_gf64_mut(&mut parity_buf).chunks_exact_mut(data_symbols);
+        let mut iter = u64_as_gf64_mut(&mut parity_buf).chunks_exact_mut(padded_data_symbols);
         assert_eq!(iter.len(), factors.len() - 1);
-        for (chunk, chunk_factors) in (&mut iter).zip(&factors[1..]) {
+        for (chunk, chunk_factors) in (&mut iter).zip_eq(&factors[1..]) {
             chunk.copy_from_slice(&memory);
             forward_transform(chunk, chunk_factors);
         }
@@ -196,14 +172,13 @@ fn oversample(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf,
         forward_transform(&mut memory, factors.last().unwrap());
         last.copy_from_slice(&memory[..last.len()]);
 
-        send_parity.send(Some((parity_buf, code_idx))).unwrap();
+        chans.send_result.send(Some((parity_buf, code_idx))).unwrap();
         progress.add(1);
     }
 }
 
-fn recovery(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
-            recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>,
-            data_symbols: usize, parity_symbols: usize,
+fn recovery(chans: WorkerChans,
+            padded_codeword_len: usize,
             t_factors: &TransformFactors,
             d_factors: &DerivativeFactors,
             error_indices: &[usize], valid_indices: &[usize],
@@ -212,35 +187,31 @@ fn recovery(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, u
 
     assert_eq!(error_indices.len(), err_locator_values.len());
     assert_eq!(valid_indices.len(), err_locator_derivative_inverses.len());
+    assert_eq!(t_factors.offset().0, 0);
 
-    let mut memory = vec![GF64(0); data_symbols + parity_symbols];
+    let mut memory = vec![GF64(0); padded_codeword_len];
 
-    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
+    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = chans.recv_data.recv().unwrap() {
         let locked_buf = buf.try_read().unwrap();
-        let block_iter = u64_as_gf64(&locked_buf)[offset..].iter().step_by(codes).copied();
-        assert_eq!(block_iter.len(), valid_indices.len());
-        assert_eq!(block_iter.len(), err_locator_values.len());
-        for ((x, i), e) in block_iter.zip(valid_indices.iter().copied()).zip(err_locator_values.iter().copied()) {
+        for ((x, i), e) in u64_as_gf64(&locked_buf)[offset..codes * valid_indices.len()].iter().step_by(codes).zip_eq(valid_indices).zip_eq(err_locator_values) {
             // Extract block values from buffer of interleaved blocks and multiply by error locator
-            memory[i] = x * e;
-        }
-        for i in error_indices.iter().copied() {
-            memory[i] = GF64(0);
+            memory[*i] = *x * *e;
         }
         drop(locked_buf);
-        return_if_last(buf, reader_count, return_data_buf);
+        return_if_last(buf, reader_count, chans.return_data_buf);
 
+        for i in error_indices {
+            memory[*i] = GF64(0);
+        }
         inverse_transform(&mut memory, t_factors);
         formal_derivative(&mut memory, d_factors);
         forward_transform(&mut memory, t_factors);
 
-        let mut recovered_data_buf = recv_parity_buf.recv().unwrap(); // TODO: rename parity to 'output' or 'recovered' or something
-        assert_eq!(recovered_data_buf.len(), error_indices.len());
-        assert_eq!(recovered_data_buf.len(), err_locator_derivative_inverses.len());
-        for ((x, i), inverse) in u64_as_gf64_mut(&mut recovered_data_buf).iter_mut().zip(error_indices.iter().copied()).zip(err_locator_derivative_inverses.iter().copied()) {
-            *x = memory[i] * inverse;
+        let mut recovered_data_buf = chans.recv_result_buf.recv().unwrap();
+        for ((x, i), inverse) in u64_as_gf64_mut(&mut recovered_data_buf).iter_mut().zip_eq(error_indices).zip_eq(err_locator_derivative_inverses) {
+            *x = memory[*i] * *inverse;
         }
-        send_parity.send(Some((recovered_data_buf, code_idx))).unwrap();
+        chans.send_result.send(Some((recovered_data_buf, code_idx))).unwrap();
         progress.add(1);
     }
 }
@@ -268,7 +239,7 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
         let mut parity_buf = recv_parity_buf.recv().unwrap();
         assert_eq!(parity_buf.len(), parity_blocks);
         if let Some(output_x_values) = output_x_values {
-            for (x, y) in u64_as_gf64(output_x_values).iter().zip(u64_as_gf64_mut(&mut parity_buf)) {
+            for (x, y) in u64_as_gf64(output_x_values).iter().zip_eq(u64_as_gf64_mut(&mut parity_buf)) {
                 *y = evaluate_poly(poly, *x);
             }
         } else {
@@ -281,33 +252,33 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
     }
 }
 
-fn write_data(recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &Sender<Buf>,
-              mapped_input: &mut [u8], mapped_output: &mut [u8],
-              output_blocks: usize, output_indices: (BlockIndices, BlockIndices),
+fn write_data(recv_data: &Receiver<Option<(Buf, usize)>>, return_buf: &Sender<Buf>,
+              mapped_data_file: &mut [u8], mapped_parity_file: &mut [u8],
+              output_indices: (impl BlockIndices, impl BlockIndices),
               progress: &ProgressBar) -> io::Result<()> {
 
     loop {
-        let Some((parity, code_index)) = recv_parity.recv().unwrap() else { return Ok(()); };
-        assert!(parity.len() == output_blocks);
+        let Some((data, code_index)) = recv_data.recv().unwrap() else { return Ok(()); };
+        assert_eq!(data.len(), output_indices.0.len() + output_indices.1.len());
 
         let offset = code_index * 8;
         let mut parity_idx = 0;
         for base_file_idx in output_indices.0.clone() {
             let file_idx = base_file_idx.as_usize() + offset;
-            if file_idx + 8 <= mapped_input.len() {
-                mapped_input[file_idx..file_idx + 8].copy_from_slice(&parity[parity_idx].to_le_bytes());
+            if file_idx + 8 <= mapped_data_file.len() {
+                mapped_data_file[file_idx..file_idx + 8].copy_from_slice(&data[parity_idx].to_le_bytes());
             } else {
-                assert_eq!(parity[parity_idx], 0, "values outside the file must be zero");
+                assert_eq!(data[parity_idx], 0, "values outside the file must be zero");
             }
             parity_idx += 1;
         };
         for base_file_idx in output_indices.1.clone() {
             let file_idx = base_file_idx.as_usize() + offset;
-            mapped_output[file_idx..file_idx + 8].copy_from_slice(&parity[parity_idx].to_le_bytes());
+            mapped_parity_file[file_idx..file_idx + 8].copy_from_slice(&data[parity_idx].to_le_bytes());
             parity_idx += 1;
         };
         
-        return_parity_buf.send(parity).unwrap();
+        return_buf.send(data).unwrap();
         progress.add(1);
     }
 }
@@ -318,65 +289,57 @@ pub struct EncodeOptions {
 }
 
 struct PerfParams {
-    cpus: usize,
-    buf_amount: usize,
-    mem_per_buf: usize,
-    symbols_read_per_code: usize,
+    two_bigbuf: bool,
+    codes_read_at_once: usize,
 }
-fn choose_cpus_and_mem(input_blocks: usize, output_blocks: usize, block_symbols: usize) -> PerfParams {
-    let cpus = num_cpus::get();
 
-    let (buf_amount, symbols_read_per_code) = 'a: {
-        const MEM_USE_PERCENT: u64 = 90;
-        const MAX_SYM_PER_CODE: u64 = 16284;
-        let available_memory = {
-            use sysinfo::{System, RefreshKind, MemoryRefreshKind};
-            let sys_mem = System::new_with_specifics(RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram())).available_memory();
-            let mem = (sys_mem * MEM_USE_PERCENT) / 100;
-            mem.checked_sub((input_blocks * 3 * 8 * cpus).as_u64()) // substract memory used by processor threads (interpolation memory, polynomial)
-               .and_then(|x| x.checked_sub((output_blocks * 8).as_u64())) // substract memory used for output buffers
-               .unwrap_or(0)
-        };
+fn choose_cpus_and_mem(threads: usize, input_blocks: usize, output_blocks: usize, block_symbols: usize) -> PerfParams {
+    const MEM_USE_PERCENT: u64 = 90;
+    const MAX_CODES: u64 = 16284;
 
-        if available_memory >= (input_blocks * block_symbols * 8).as_u64() { break 'a (1, block_symbols); }
+    let available_memory = ((get_available_memory() * MEM_USE_PERCENT) / 100)
+    .saturating_sub((input_blocks * 3 * 8 * threads).as_u64()) // substract memory used by processor threads (interpolation memory, polynomial)
+    .saturating_sub((output_blocks * 8).as_u64()); // substract memory used for output buffers
 
-        let sym_per_code = available_memory / input_blocks.as_u64() * 8 * 2;
-        if sym_per_code > MAX_SYM_PER_CODE { ((sym_per_code / MAX_SYM_PER_CODE).clamp(1, 2) as usize, MAX_SYM_PER_CODE as usize) } else { ((sym_per_code / 2) as usize, 2) }
-    };
-    println!("Using {cpus} CPUs, {buf_amount} buffers, reading {} bytes per reading pass ({symbols_read_per_code} symbols per code)", symbols_read_per_code * 8 * input_blocks);
-    let mem_per_buf = symbols_read_per_code * input_blocks;
-    PerfParams {cpus, buf_amount, mem_per_buf, symbols_read_per_code}
+    let codes_read_at_once = available_memory / input_blocks.as_u64() * 8 * 2;
+
+    let (two_bigbuf, codes_read_at_once) = if available_memory >= (input_blocks * block_symbols * 8).as_u64() { (false, block_symbols) }
+        else if codes_read_at_once > MAX_CODES { ((codes_read_at_once / MAX_CODES).clamp(1, 2) == 2, MAX_CODES as usize) } else { (true, (codes_read_at_once / 2) as usize) };
+
+    println!("Using {threads} CPUs, {two_bigbuf} buffers, reading {} bytes per reading pass ({codes_read_at_once} symbols per code)", codes_read_at_once * 8 * input_blocks);
+    PerfParams {two_bigbuf, codes_read_at_once}
 }
 
 fn internal_encode_pipeline(
-        input: &mut File, output: &mut File, file_len: u64, output_file_len: u64,
+        input: &mut File, output: &mut File,
         good_blocks: usize, bad_blocks: usize, block_symbols: usize,
-        input_block_indices: (BlockIndices, BlockIndices),
-        output_block_indices: (BlockIndices, BlockIndices),
-        input_x_values: Option<Vec<u64>>, output_x_values: Option<Vec<u64>>,
-        input_map: &mut [u8], parity_map: &mut [u8]
+        input_block_indices: (impl BlockIndices, impl BlockIndices),
+        output_block_indices: (impl BlockIndices, impl BlockIndices),
+        input_map: &mut [u8], parity_map: &mut [u8],
+        spawn_processor_thread: &(dyn Fn(WorkerChans, &ProgressBar) + Sync),
     ) -> io::Result<()> {
 
-    let PerfParams{cpus, buf_amount, mem_per_buf, symbols_read_per_code} = choose_cpus_and_mem(good_blocks, bad_blocks, block_symbols);
+    let cpus = num_cpus::get();
+    let PerfParams{two_bigbuf, codes_read_at_once} = choose_cpus_and_mem(cpus, good_blocks, bad_blocks, block_symbols);
 
     // create channels
-    let data_to_adapter = channel();
-    let adapter_to_processors = channel();
-    let return_data = channel();
-    let parity = channel();
-    let return_parity = channel();
+    let data_to_adapter = unbounded();
+    let adapter_to_processors = unbounded();
+    let return_data_buf = unbounded();
+    let result = unbounded();
+    let return_result_buf = unbounded();
 
     // allocate BigBuf for reading
-    for _ in 0..buf_amount {
-        return_data.0.send(Arc::new(RwLock::new(vec![0_u64; mem_per_buf].into_boxed_slice()))).unwrap();
+    for _ in 0..1 + two_bigbuf as usize {
+        return_data_buf.0.send(Arc::new(RwLock::new(vec![0_u64; codes_read_at_once * good_blocks].into_boxed_slice()))).unwrap();
     }
 
     // allocate Buf for writing
     for _ in 0..cpus * 2 {
-        return_parity.0.send(vec![0; bad_blocks].into_boxed_slice()).unwrap();
+        return_result_buf.0.send(vec![0; bad_blocks].into_boxed_slice()).unwrap();
     }
 
-    let single = progress(good_blocks * symbols_read_per_code, "one read pass");
+    let single = progress(good_blocks * codes_read_at_once, "one read pass");
     let read_prog = progress(block_symbols, "read");
     let process_prog = progress(block_symbols, "process");
     let write_prog = progress(block_symbols, "write");
@@ -385,27 +348,23 @@ fn internal_encode_pipeline(
     // spawn threads
     std::thread::scope(|s| {
         let reader = s.spawn(|| read_data(
-            &return_data.1, &data_to_adapter.0,
-            block_symbols, symbols_read_per_code,
+            &return_data_buf.1, &data_to_adapter.0,
+            block_symbols, codes_read_at_once,
             input, output,
-            file_len, output_file_len,
             input_block_indices,
             &read_prog, &single
         ));
         let read_to_processors = s.spawn(|| read_to_processors(&data_to_adapter.1, &adapter_to_processors.0));
-        let processor_threads = (0..cpus).map(|_| {
-            s.spawn(|| process_codes(
-                &return_parity.1, &parity.0,
-                &adapter_to_processors.1, &return_data.0,
-                good_blocks, bad_blocks,
-                input_x_values.as_ref(), output_x_values.as_ref(),
-                &process_prog
-            ))
-        }).collect::<Vec<_>>();
+        let processor_threads = (0..cpus).map(|_| s.spawn(|| spawn_processor_thread(WorkerChans {
+            recv_result_buf: &return_result_buf.1,
+            send_result: &result.0,
+            recv_data: &adapter_to_processors.1,
+            return_data_buf: &return_data_buf.0,
+        }, &process_prog))).collect::<Vec<_>>();
         let writer = s.spawn(|| write_data(
-            &parity.1, &return_parity.0,
+            &result.1, &return_result_buf.0,
             input_map, parity_map,
-            bad_blocks, output_block_indices,
+            output_block_indices,
             &write_prog
         ));
 
@@ -422,32 +381,62 @@ fn internal_encode_pipeline(
         }
 
         // stop writer thread
-        parity.0.send(None).unwrap();
+        result.0.send(None).unwrap();
         writer.join().unwrap()?;
         io::Result::Ok(())
     })?;
     Ok(())
 }
 
-pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Result<()> {
+fn precompute_oversample_factors(block_symbols: usize, factors_len: usize) -> Vec<TransformFactors> {
+    assert!(block_symbols.is_power_of_two());
+    let pow = block_symbols.ilog2();
+    let threads = num_cpus::get().min(factors_len);
 
-    assert!(opt.block_bytes % 8 == 0, "block bytes must be divisible by 8");
-    let block_symbols = opt.block_bytes / 8;
+    let mut factors: Vec<Option<TransformFactors>> = vec![None; factors_len];
+
+    std::thread::scope(|s| {
+        let chan = unbounded::<(u64, &mut Option<TransformFactors>)>();
+
+        for _ in 0..threads {
+            let recv = chan.1.clone();
+            s.spawn(move || {
+                while let Ok((offset, out)) = recv.recv() {
+                    *out = Some(precompute_transform_factors(pow, GF64(offset)));
+                }
+            });
+        }
+
+        for (offset, out) in (0..).step_by(block_symbols).zip(factors.iter_mut()) {
+            chan.0.send((offset, out)).unwrap();
+        }
+    });
+
+    factors.into_iter().map(Option::unwrap).collect()
+}
+
+pub fn encode(input: &mut File, output: &mut File, EncodeOptions { block_bytes, parity_blocks }: EncodeOptions) -> io::Result<()> {
+
+    assert!(block_bytes % 8 == 0, "block bytes must be divisible by 8");
+    let block_symbols = block_bytes / 8;
     let input_file_len = input.metadata()?.len();
 
-    let data_blocks = usize::try_from(input_file_len.div_ceil(opt.block_bytes.as_u64())).expect("data blocks number must fit in usize");
+    let padded_block_symbols = if block_symbols.is_power_of_two() { block_symbols } else { block_symbols.next_power_of_two() };
+    let factors_len = parity_blocks.div_ceil(padded_block_symbols);
+    let factors = precompute_oversample_factors(padded_block_symbols, factors_len);
+
+    let data_blocks = input_file_len.div_ceil(block_bytes.as_u64()).as_usize();
     println!("{data_blocks} data blocks");
 
-    let header = format_header(Header{data_blocks, parity_blocks: opt.parity_blocks, block_bytes: opt.block_bytes, file_len: input_file_len});
+    let header = format_header(Header{data_blocks, parity_blocks, block_bytes, file_len: input_file_len});
 
     // 32 bytes per hash, and first u64 from each block
-    let hashes_bytes = 40 * (data_blocks + opt.parity_blocks);
+    let hashes_bytes = 40 * (data_blocks + parity_blocks);
     assert!(hashes_bytes % 8 == 0);
 
-    let parity_blocks_bytes = opt.block_bytes * opt.parity_blocks;
+    let parity_blocks_bytes = block_bytes * parity_blocks;
 
-    let output_file_len = (HEADER_LEN + hashes_bytes + parity_blocks_bytes).as_u64();
-    output.set_len(output_file_len)?;
+    output.set_len((HEADER_LEN + hashes_bytes + parity_blocks_bytes).as_u64())?;
     output.write_all(&header)?;
 
     let mut output_map = unsafe { MmapOptions::new().map_mut(&*output)? };
@@ -456,12 +445,12 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
     assert_eq!(parity_map.len(), parity_blocks_bytes);
 
     internal_encode_pipeline(
-        input, output, input_file_len, output_file_len,
-        data_blocks, opt.parity_blocks, block_symbols,
-        ((0..data_blocks.as_u64()).step_by(opt.block_bytes).into(), BlockIndices::Empty),
-        (BlockIndices::Empty, (0..opt.parity_blocks.as_u64()).step_by(opt.block_bytes).into()),
-        None, None,
+        input, output,
+        data_blocks, parity_blocks, block_symbols,
+        ((0..data_blocks).map(|x| x.as_u64() * block_bytes.as_u64()), std::iter::empty()),
+        (std::iter::empty(), (0..parity_blocks).map(|x| x.as_u64() * block_bytes.as_u64())),
         &mut [], parity_map,
+        &|chans, progress| oversample(chans, block_symbols, padded_block_symbols, &factors, progress),
     )?;
 
     let (data_hashes, parity_hashes) = hashes_map.split_at_mut(40 * data_blocks);
@@ -471,8 +460,8 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
         make_multiprogress([&data_prog, &par_prog]);
         let t = s.spawn(|| {
             let data_prog = data_prog;
-            let mut buf = vec![0_u8; opt.block_bytes];
-            let last_block_rem = (input_file_len % opt.block_bytes.as_u64()) as usize;
+            let mut buf = vec![0_u8; block_bytes];
+            let last_block_rem = (input_file_len % block_bytes.as_u64()) as usize;
             input.seek(std::io::SeekFrom::Start(0))?;
             let last_hash = data_hashes.len() / 40 - 1;
             for (i, out) in data_hashes.chunks_exact_mut(40).enumerate() {
@@ -490,7 +479,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
         });
         s.spawn(|| {
             let par_prog = par_prog;
-            for (block, out) in parity_map.chunks_exact(opt.block_bytes).zip(parity_hashes.chunks_exact_mut(40)) {
+            for (block, out) in parity_map.chunks_exact(block_bytes).zip(parity_hashes.chunks_exact_mut(40)) {
                 out[..8].copy_from_slice(&block[..8]);
                 out[8..40].copy_from_slice(blake3::hash(block).as_bytes());
                 par_prog.add(1);
@@ -513,51 +502,24 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
     Ok(())
 }
 
-fn bools_to_indices(b: &Option<Box<[bool]>>, default_len: usize, invert: bool) -> Vec<u64> {
-    if let Some(b) = b {
-        b.iter().enumerate().filter_map(|(i, &x)| if x ^ invert { Some(i.as_u64()) } else { None }).collect()
-    } else if invert {
-        (0..default_len.as_u64()).collect()
-    } else {
-        vec![]
+fn collect_good_indices(corrupt: &[u64], len: usize) -> Vec<u64> {
+    let mut good_indices = Vec::with_capacity(len - corrupt.len());
+    let mut corrupt_idx = 0;
+    for idx in 0..len.as_u64() {
+        if corrupt[corrupt_idx] == idx {
+            corrupt_idx += 1;
+        } else {
+            good_indices.push(idx);
+        }
     }
+    assert_eq!(corrupt_idx, corrupt.len());
+    assert_eq!(good_indices.len(), len - corrupt.len());
+    good_indices
 }
 
-pub fn repair(input: &mut File, output: &mut File, header: Header, input_corruption: Option<Box<[bool]>>, output_corruption: Option<Box<[bool]>>) -> io::Result<()> {
-    let block_bytes = header.block_bytes;
-    let parity_blocks = header.parity_blocks;
-    let data_blocks = header.data_blocks;
-
-    let block_symbols = block_bytes / 8;
-
-    let input_len = input.metadata()?.len();
-    let output_len = output.metadata()?.len();
-
-    let mut input_map = unsafe { MmapOptions::new().map_mut(&*input)? };
-    let mut output_map = unsafe { MmapOptions::new().map_mut(&*output)? };
-
-    let mut good_input_blocks = bools_to_indices(&input_corruption, data_blocks, true);
-    let mut good_output_blocks = bools_to_indices(&output_corruption, parity_blocks, true);
-    let mut bad_input_blocks = bools_to_indices(&input_corruption, data_blocks, false);
-    let mut bad_output_blocks = bools_to_indices(&output_corruption, parity_blocks, false);
-
-    let mut input_x_values = good_input_blocks.clone();
-    input_x_values.extend(good_output_blocks.iter().map(|&x| x + data_blocks.as_u64()));
-
-    let mut output_x_values = bad_input_blocks.clone();
-    output_x_values.extend(bad_output_blocks.iter().map(|&x| x + data_blocks.as_u64()));
-
-    for x in good_input_blocks.iter_mut().chain(bad_input_blocks.iter_mut()) {
-        *x *= block_bytes.as_u64();
-    }
-
-    let metadata_bytes = HEADER_LEN + 40 * (data_blocks + parity_blocks);
-    for x in good_output_blocks.iter_mut().chain(bad_output_blocks.iter_mut()) {
-        *x = metadata_bytes.as_u64() + *x * block_bytes.as_u64();
-    }
-
-    let good_blocks = input_x_values.len();
-    let bad_blocks = output_x_values.len();
+pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_blocks, parity_blocks, file_len: _ }: Header, data_corruption: Vec<u64>, parity_corruption: Vec<u64>) -> io::Result<()> {
+    let bad_blocks = data_corruption.len() + parity_corruption.len();
+    let good_blocks = data_blocks + parity_blocks - bad_blocks;
 
     println!("{good_blocks} good blocks, {data_blocks} required for repair, {bad_blocks} bad blocks");
     if good_blocks < data_blocks {
@@ -565,15 +527,30 @@ pub fn repair(input: &mut File, output: &mut File, header: Header, input_corrupt
         return Ok(());
     }
 
+    let metadata_bytes = HEADER_LEN + 40 * (data_blocks + parity_blocks);
+
+    let mut input_map = unsafe { MmapOptions::new().map_mut(&*input)? };
+    let mut output_map = unsafe { MmapOptions::new().map_mut(&*output)? };
+
+    // TODO: remove use of leak
+    let data_corruption = data_corruption.leak();
+    let parity_corruption = parity_corruption.leak();
+    let good_data_blocks = collect_good_indices(data_corruption, data_blocks).leak();
+    let good_parity_blocks = collect_good_indices(parity_corruption, parity_blocks).leak();
+
+    let iter = |x: &'static [u64]| x.iter().map(|i| *i * block_bytes.as_u64());
+
     internal_encode_pipeline(
-        input, output, input_len, output_len,
-        good_blocks, bad_blocks, block_symbols,
-        (good_input_blocks.iter().into(), good_output_blocks.iter().into()),
-        (bad_input_blocks.iter().into(), bad_output_blocks.iter().into()),
-        Some(input_x_values), Some(output_x_values),
-        &mut input_map, &mut output_map,
+        input, output,
+        good_blocks, bad_blocks, block_bytes / 8,
+        (iter(good_data_blocks), iter(good_parity_blocks)),
+        (iter(data_corruption), iter(parity_corruption)),
+        &mut input_map, &mut output_map[metadata_bytes..],
+        &|chans, progress| recovery(chans, todo!(), todo!(), todo!(), todo!(), todo!(), todo!(), todo!(), progress)
     )?;
 
+    input_map.flush()?;
+    output_map.flush()?;
     drop(input_map);
     drop(output_map);
     input.sync_all()?;

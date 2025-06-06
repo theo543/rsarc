@@ -2,33 +2,31 @@ use std::{fs::File, io::{self, Read, Seek}};
 
 use crate::{header::{get_meta_hash, read_header, Header, HEADER_LEN, HEADER_STRING}, utils::IntoU64Ext};
 
-type VerifBools = Option<Box<[bool]>>;
-
 pub enum VerifyResult {
-    Ok{data_file: VerifBools, parity_file: VerifBools, header: Header},
+    Ok{data_errors: Vec<u64>, parity_errors: Vec<u64>, header: Header},
     MetadataCorrupted(String),
 }
 
 impl VerifyResult {
     pub fn report_corruption(&self, panic_on_corruption: bool) {
         match self {
-            VerifyResult::Ok { data_file, parity_file, .. } => {
-                if data_file.is_some() { println!("Data file corrupted") }
-                if parity_file.is_some() { println!("Parity file corrupted") }
-                if data_file.is_none() && parity_file.is_none() { println!("No corruption detected") } else if panic_on_corruption { panic!() }
+            VerifyResult::Ok { data_errors: data_file, parity_errors: parity_file, .. } => {
+                if !data_file.is_empty() { println!("Data file corrupted") }
+                if !parity_file.is_empty() { println!("Parity file corrupted") }
+                if !data_file.is_empty() && !parity_file.is_empty() { println!("No corruption detected") } else if panic_on_corruption { panic!() }
             }
             VerifyResult::MetadataCorrupted(msg) => { println!("Metadata corrupted: {}", msg); if panic_on_corruption { panic!() } }
         }
     }
 }
 
-pub fn verify_file(file: &mut File, hashes: &[u8], block_bytes: usize, blocks: usize, mut len: u64) -> io::Result<VerifBools> {
+pub fn verify_file(file: &mut File, hashes: &[u8], block_bytes: usize, blocks: usize, mut len: u64) -> io::Result<Vec<u64>> {
     assert_eq!(hashes.len(), blocks * 40);
     assert_eq!(block_bytes % 8, 0);
-    let mut corrupt = vec![false; blocks].into_boxed_slice();
+
+    let mut errors = vec![];
     let mut block_buf = vec![0; block_bytes];
-    let mut any_corrupt = false;
-    for (bool, expected) in corrupt.iter_mut().zip(hashes.chunks_exact(40)) {
+    for (expected, i) in hashes.chunks_exact(40).zip(0_u64..) {
         let expected_block_header: [u8; 8] = expected[..8].try_into().unwrap();
         let expected_block_hash: [u8; 32] = expected[8..].try_into().unwrap();
 
@@ -44,12 +42,11 @@ pub fn verify_file(file: &mut File, hashes: &[u8], block_bytes: usize, blocks: u
 
         let block_header: [u8; 8] = block_buf[..8].try_into().unwrap();
         if block_header != expected_block_header || *blake3::hash(&block_buf).as_bytes() != expected_block_hash {
-            *bool = true;
-            any_corrupt = true;
+            errors.push(i);
         }
     }
     assert_eq!(len, 0);
-    Ok(if any_corrupt { Some(corrupt) } else { None })
+    Ok(errors)
 }
 
 pub fn verify(input: &mut File, parity: &mut File) -> io::Result<VerifyResult> {
@@ -93,5 +90,5 @@ pub fn verify(input: &mut File, parity: &mut File) -> io::Result<VerifyResult> {
     parity.seek(io::SeekFrom::Start(HEADER_LEN as u64 + hashes_bytes as u64))?;
     let parity_file = verify_file(parity, par_hashes, header.block_bytes, header.parity_blocks, parity_bytes)?;
 
-    Ok(VerifyResult::Ok{data_file, parity_file, header})
+    Ok(VerifyResult::Ok{data_errors: data_file, parity_errors: parity_file, header})
 }

@@ -76,7 +76,7 @@ pub fn test() {
 
     let corruption = verify(&mut input, &mut output).unwrap();
     corruption.report_corruption(false);
-    let VerifyResult::Ok{data_file, parity_file, header} = corruption else { panic!("metadata should not be corrupted") };
+    let VerifyResult::Ok{data_errors: data_file, parity_errors: parity_file, header} = corruption else { panic!("metadata should not be corrupted") };
     repair(&mut input, &mut output, header, data_file, parity_file).unwrap();
 
     verify(&mut input, &mut output).unwrap().report_corruption(true);

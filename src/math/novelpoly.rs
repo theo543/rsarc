@@ -41,6 +41,7 @@ fn eval_normalized_vanishing_poly(x: GF64, j: u32) -> GF64 {
     eval_vanishing_poly(x, j) * get_normalization_factor(j)
 }
 
+#[derive(Clone)]
 pub struct TransformFactors {
     offset: GF64,
     factors: Box<[GF64]>,

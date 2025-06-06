@@ -82,8 +82,8 @@ fn main() {
             let corruption = verifier::verify(&mut input, &mut output).unwrap();
 
             match corruption {
-                verifier::VerifyResult::Ok { data_file, parity_file, header } => {
-                    if data_file.is_none() && parity_file.is_none() {
+                verifier::VerifyResult::Ok { data_errors: data_file, parity_errors: parity_file, header } => {
+                    if data_file.is_empty() && parity_file.is_empty() {
                         println!("No corruption detected");
                         return;
                     }
