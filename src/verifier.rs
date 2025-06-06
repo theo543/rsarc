@@ -13,7 +13,7 @@ impl VerifyResult {
             VerifyResult::Ok { data_errors: data_file, parity_errors: parity_file, .. } => {
                 if !data_file.is_empty() { println!("Data file corrupted") }
                 if !parity_file.is_empty() { println!("Parity file corrupted") }
-                if !data_file.is_empty() && !parity_file.is_empty() { println!("No corruption detected") } else if panic_on_corruption { panic!() }
+                if data_file.is_empty() && parity_file.is_empty() { println!("No corruption detected") } else if panic_on_corruption { panic!() }
             }
             VerifyResult::MetadataCorrupted(msg) => { println!("Metadata corrupted: {}", msg); if panic_on_corruption { panic!() } }
         }
