@@ -32,6 +32,7 @@ Later: Implement metadata redundancy to recover from header corruption by interl
 
 fn main() {
     math::gf64::check_cpu_support_for_carryless_multiply();
+    utils::progress::register_panic_hook();
 
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|x| x.as_str()).unwrap_or("test") {

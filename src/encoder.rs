@@ -16,7 +16,7 @@ use crate::header::{format_header, set_meta_hash, Header, HEADER_LEN, HEADER_STR
 use crate::math::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
 use crate::math::polynomials::{evaluate_poly, newton_interpolation};
 use crate::math::novelpoly::{formal_derivative, forward_transform, inverse_transform, DerivativeFactors, TransformFactors};
-use crate::utils::progress::{progress_usize as progress, make_multiprogress};
+use crate::utils::progress::{progress_usize as progress, make_multiprogress, IncIfNotFinished};
 use crate::utils::{IntoU64Ext, IntoUSizeExt};
 
 // Data symbols from multiple codes are read in at once, to try to minimize read overhead
@@ -129,7 +129,7 @@ fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>
 
         drop(buf_lock);
         send_buf.send(Some(ReadDataMsg{buf, first_code: code_idx, codes: codes_in_read})).unwrap();
-        progress.inc(codes_in_read.as_u64());
+        progress.add(codes_in_read.as_u64());
     }
 
     send_buf.send(None).unwrap(); // shut down read_to_processors
@@ -197,7 +197,7 @@ fn oversample(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf,
         last.copy_from_slice(&memory[..last.len()]);
 
         send_parity.send(Some((parity_buf, code_idx))).unwrap();
-        progress.inc(1);
+        progress.add(1);
     }
 }
 
@@ -241,7 +241,7 @@ fn recovery(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, u
             *x = memory[i] * inverse;
         }
         send_parity.send(Some((recovered_data_buf, code_idx))).unwrap();
-        progress.inc(1);
+        progress.add(1);
     }
 }
 
@@ -277,7 +277,7 @@ fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(B
             }
         }
         send_parity.send(Some((parity_buf, code_idx))).unwrap();
-        progress.inc(1);
+        progress.add(1);
     }
 }
 
@@ -308,7 +308,7 @@ fn write_data(recv_parity: &Receiver<Option<(Buf, usize)>>, return_parity_buf: &
         };
         
         return_parity_buf.send(parity).unwrap();
-        progress.inc(1);
+        progress.add(1);
     }
 }
 
@@ -484,7 +484,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
                 }
                 out[..8].copy_from_slice(&buf[..8]);
                 out[8..40].copy_from_slice(blake3::hash(&buf).as_bytes());
-                data_prog.inc(1);
+                data_prog.add(1);
             }
             io::Result::Ok(())
         });
@@ -493,7 +493,7 @@ pub fn encode(input: &mut File, output: &mut File, opt: EncodeOptions) -> io::Re
             for (block, out) in parity_map.chunks_exact(opt.block_bytes).zip(parity_hashes.chunks_exact_mut(40)) {
                 out[..8].copy_from_slice(&block[..8]);
                 out[8..40].copy_from_slice(blake3::hash(block).as_bytes());
-                par_prog.inc(1);
+                par_prog.add(1);
             }
         });
         t.join().unwrap()?;
