@@ -421,12 +421,12 @@ pub fn encode(input: &mut File, output: &mut File, EncodeOptions { block_bytes, 
     let block_symbols = block_bytes / 8;
     let input_file_len = input.metadata()?.len();
 
-    let padded_block_symbols = if block_symbols.is_power_of_two() { block_symbols } else { block_symbols.next_power_of_two() };
-    let factors_len = parity_blocks.div_ceil(padded_block_symbols);
-    let factors = precompute_oversample_factors(padded_block_symbols, factors_len);
-
     let data_blocks = input_file_len.div_ceil(block_bytes.as_u64()).as_usize();
     println!("{data_blocks} data blocks");
+
+    let padded_data_blocks = data_blocks.next_power_of_two(); // next_power_of_two means "smallest power of two greater than or equal to data_blocks", not "next power of two after data_blocks"
+    let factors_len = parity_blocks.div_ceil(padded_data_blocks);
+    let factors = precompute_oversample_factors(padded_data_blocks, factors_len);
 
     let header = format_header(Header{data_blocks, parity_blocks, block_bytes, file_len: input_file_len});
 
@@ -450,7 +450,7 @@ pub fn encode(input: &mut File, output: &mut File, EncodeOptions { block_bytes, 
         ((0..data_blocks).map(|x| x.as_u64() * block_bytes.as_u64()), std::iter::empty()),
         (std::iter::empty(), (0..parity_blocks).map(|x| x.as_u64() * block_bytes.as_u64())),
         &mut [], parity_map,
-        &|chans, progress| oversample(chans, block_symbols, padded_block_symbols, &factors, progress),
+        &|chans, progress| oversample(chans, data_blocks, padded_data_blocks, &factors, progress),
     )?;
 
     let (data_hashes, parity_hashes) = hashes_map.split_at_mut(40 * data_blocks);
