@@ -324,9 +324,9 @@ mod tests {
         let d_factors = precompute_derivative_factors(N.ilog2());
         let (error_values, error_derivative_values) = compute_error_locator_poly(&errors[..error_count], N, &t_factors, &d_factors);
 
-        let errors = || errors.iter().take(error_count).map(|e| *e as usize);
+        let errors = errors.iter().take(error_count).map(|e| *e as usize);
 
-        for e in errors() {
+        for e in errors.clone() {
             assert_eq!(error_values[e], GF64(0));
         }
 
@@ -342,7 +342,7 @@ mod tests {
         let backup = encoded;
 
         // Simulate data loss
-        for e in errors() {
+        for e in errors.clone() {
             encoded[e] = GF64(0);
         }
 
@@ -356,7 +356,7 @@ mod tests {
         formal_derivative(&mut encoded, &d_factors);
         forward_transform(&mut encoded, &t_factors);
 
-        for e in errors() {
+        for e in errors {
             // By the product rule, (f(x) * e(x))' = f'(x) * e(x) + f(x) * e'(x)
             // At error points, e(x) = 0, so (f(x) * e(x))' = f(x) * e'(x) <=> f(x) = (f(x) * e(x))' / e'(x)
 

@@ -2,9 +2,6 @@
 
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
-use std::iter::StepBy;
-use std::ops::Range;
-use std::slice::Iter;
 use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, RwLock};
 use crossbeam_channel::{unbounded, Sender, Receiver};
 
@@ -15,7 +12,7 @@ use positioned_io::{RandomAccessFile, ReadAt};
 use crate::header::{format_header, set_meta_hash, Header, HEADER_LEN, HEADER_STRING};
 use crate::math::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
 use crate::math::polynomials::{evaluate_poly, newton_interpolation};
-use crate::math::novelpoly::{formal_derivative, forward_transform, inverse_transform, precompute_transform_factors, DerivativeFactors, TransformFactors};
+use crate::math::novelpoly::{compute_error_locator_poly, formal_derivative, forward_transform, inverse_transform, precompute_derivative_factors, precompute_transform_factors, DerivativeFactors, TransformFactors};
 use crate::utils::progress::{progress_usize as progress, make_multiprogress, IncIfNotFinished};
 use crate::utils::{get_available_memory, IntoU64Ext, IntoUSizeExt, ZipEqExt};
 
@@ -151,26 +148,29 @@ fn oversample(chans: WorkerChans,
     let mut memory = vec![GF64(0); padded_data_symbols];
 
     while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = chans.recv_data.recv().unwrap() {
-        for (x, m) in buf.try_read().unwrap()[offset..codes * data_symbols].iter().step_by(codes).zip_eq(&mut memory[..data_symbols]) {
+        let (mem_for_data, mem_padding) = memory.split_at_mut(data_symbols);
+        for (x, m) in buf.try_read().unwrap()[offset..codes * data_symbols].iter().step_by(codes).zip_eq(mem_for_data) {
             *m = GF64(*x);
         }
         return_if_last(buf, reader_count, chans.return_data_buf);
+        mem_padding.fill(GF64(0));
 
-        memory[data_symbols..].fill(GF64(0));
         inverse_transform(&mut memory, &factors[0]);
 
         let mut parity_buf = chans.recv_result_buf.recv().unwrap();
 
+        let extra_chunk = parity_buf.len() % padded_data_symbols != 0;
         let mut iter = u64_as_gf64_mut(&mut parity_buf).chunks_exact_mut(padded_data_symbols);
-        assert_eq!(iter.len(), factors.len() - 1);
-        for (chunk, chunk_factors) in (&mut iter).zip_eq(&factors[1..]) {
+        for (chunk, chunk_factors) in (&mut iter).zip_eq(&factors[1..factors.len() - extra_chunk as usize]) {
             chunk.copy_from_slice(&memory);
             forward_transform(chunk, chunk_factors);
         }
 
-        let last = iter.into_remainder();
-        forward_transform(&mut memory, factors.last().unwrap());
-        last.copy_from_slice(&memory[..last.len()]);
+        if extra_chunk {
+            forward_transform(&mut memory, factors.last().unwrap());
+            let last = iter.into_remainder();
+            last.copy_from_slice(&memory[..last.len()]);
+        }
 
         chans.send_result.send(Some((parity_buf, code_idx))).unwrap();
         progress.add(1);
@@ -181,38 +181,36 @@ fn recovery(chans: WorkerChans,
             padded_codeword_len: usize,
             t_factors: &TransformFactors,
             d_factors: &DerivativeFactors,
-            error_indices: &[usize], valid_indices: &[usize],
+            error_indices: &[u64], valid_indices: &[u64],
             err_locator_values: &[GF64], err_locator_derivative_inverses: &[GF64],
             progress: &ProgressBar) {
 
-    assert_eq!(error_indices.len(), err_locator_values.len());
-    assert_eq!(valid_indices.len(), err_locator_derivative_inverses.len());
+    assert_eq!(padded_codeword_len, err_locator_values.len());
+    assert_eq!(padded_codeword_len, err_locator_derivative_inverses.len());
     assert_eq!(t_factors.offset().0, 0);
 
     let mut memory = vec![GF64(0); padded_codeword_len];
 
     while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = chans.recv_data.recv().unwrap() {
         let locked_buf = buf.try_read().unwrap();
-        for ((x, i), e) in u64_as_gf64(&locked_buf)[offset..codes * valid_indices.len()].iter().step_by(codes).zip_eq(valid_indices).zip_eq(err_locator_values) {
+        for (x, i) in u64_as_gf64(&locked_buf)[offset..codes * valid_indices.len()].iter().step_by(codes).zip_eq(valid_indices) {
             // Extract block values from buffer of interleaved blocks and multiply by error locator
-            memory[*i] = *x * *e;
+            memory[i.as_usize()] = *x * err_locator_values[i.as_usize()];
         }
         drop(locked_buf);
         return_if_last(buf, reader_count, chans.return_data_buf);
 
-        for i in error_indices {
-            memory[*i] = GF64(0);
-        }
         inverse_transform(&mut memory, t_factors);
         formal_derivative(&mut memory, d_factors);
         forward_transform(&mut memory, t_factors);
 
         let mut recovered_data_buf = chans.recv_result_buf.recv().unwrap();
-        for ((x, i), inverse) in u64_as_gf64_mut(&mut recovered_data_buf).iter_mut().zip_eq(error_indices).zip_eq(err_locator_derivative_inverses) {
-            *x = memory[*i] * *inverse;
+        for (x, i) in u64_as_gf64_mut(&mut recovered_data_buf).iter_mut().zip_eq(error_indices) {
+            *x = memory[i.as_usize()] * err_locator_derivative_inverses[i.as_usize()];
         }
         chans.send_result.send(Some((recovered_data_buf, code_idx))).unwrap();
         progress.add(1);
+        memory.fill(GF64(0));
     }
 }
 
@@ -425,7 +423,7 @@ pub fn encode(input: &mut File, output: &mut File, EncodeOptions { block_bytes, 
     println!("{data_blocks} data blocks");
 
     let padded_data_blocks = data_blocks.next_power_of_two(); // next_power_of_two means "smallest power of two greater than or equal to data_blocks", not "next power of two after data_blocks"
-    let factors_len = parity_blocks.div_ceil(padded_data_blocks);
+    let factors_len = 1 + parity_blocks.div_ceil(padded_data_blocks);
     let factors = precompute_oversample_factors(padded_data_blocks, factors_len);
 
     let header = format_header(Header{data_blocks, parity_blocks, block_bytes, file_len: input_file_len});
@@ -503,6 +501,9 @@ pub fn encode(input: &mut File, output: &mut File, EncodeOptions { block_bytes, 
 }
 
 fn collect_good_indices(corrupt: &[u64], len: usize) -> Vec<u64> {
+    if corrupt.is_empty() {
+        return (0..len.as_u64()).collect();
+    }
     let mut good_indices = Vec::with_capacity(len - corrupt.len());
     let mut corrupt_idx = 0;
     for idx in 0..len.as_u64() {
@@ -525,6 +526,14 @@ pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_bl
     let bad_blocks = data_corruption.len() + parity_corruption.len();
     let good_blocks = data_blocks + parity_blocks - bad_blocks;
 
+    let padded_codeword_len = (data_blocks.next_power_of_two() + parity_blocks).next_power_of_two();
+
+    let (t_factors, d_factors) = std::thread::scope(|s| {
+        let t_factors = s.spawn(|| precompute_transform_factors(padded_codeword_len.ilog2(), GF64(0)));
+        let d_factors = s.spawn(|| precompute_derivative_factors(padded_codeword_len.ilog2()));
+        (t_factors.join().unwrap(), d_factors.join().unwrap())
+    });
+
     println!("{good_blocks} good blocks, {data_blocks} required for repair, {bad_blocks} bad blocks");
     if good_blocks < data_blocks {
         println!("Not enough good blocks to repair");
@@ -542,15 +551,30 @@ pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_bl
     let good_data_blocks = collect_good_indices(data_corruption, data_blocks).leak();
     let good_parity_blocks = collect_good_indices(parity_corruption, parity_blocks).leak();
 
+    let mut error_indices = data_corruption.iter().copied().chain(parity_corruption.iter().map(|x| *x + data_blocks.as_u64()))
+        // implicit parity zero padding must be included in the error locator, since conceptually the padding is corrupted (zeroed instead of oversampled values)
+        .chain(((data_blocks.next_power_of_two() + parity_blocks)..padded_codeword_len).map(|x| x.as_u64()))
+        .collect::<Vec<_>>();
+    let (err_locator, mut err_locator_derivative) = compute_error_locator_poly(&error_indices, padded_codeword_len, &t_factors, &d_factors);
+    for x in err_locator_derivative.iter_mut() {
+        *x = x.invert();
+    }
+
+    // remove padding from error indices so that the recovery function doesn't attempt to actually repair the padding
+    error_indices.truncate(data_corruption.len() + parity_corruption.len());
+
+    let valid_indices = good_data_blocks.iter().copied().chain(good_parity_blocks.iter().map(|x| *x + data_blocks.as_u64())).collect::<Vec<_>>();
+
     let iter = |x: &'static [u64]| x.iter().map(|i| *i * block_bytes.as_u64());
 
     internal_encode_pipeline(
         input, output,
         good_blocks, bad_blocks, block_bytes / 8,
-        (iter(good_data_blocks), iter(good_parity_blocks)),
+        // good_parity_blocks is offset by metadata bytes because reading does not use the memory maps, so slicing output_map by metadata_bytes does not help good_parity_blocks skip the metadata
+        (iter(good_data_blocks), iter(good_parity_blocks).map(|x| x + metadata_bytes.as_u64())),
         (iter(data_corruption), iter(parity_corruption)),
         &mut input_map, &mut output_map[metadata_bytes..],
-        &|chans, progress| recovery(chans, todo!(), todo!(), todo!(), todo!(), todo!(), todo!(), todo!(), progress)
+        &|chans, progress| recovery(chans, padded_codeword_len, &t_factors, &d_factors, &error_indices, &valid_indices, &err_locator, &err_locator_derivative, progress)
     )?;
 
     input_map.flush()?;
