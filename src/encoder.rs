@@ -551,7 +551,7 @@ pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_bl
     let good_data_blocks = collect_good_indices(data_corruption, data_blocks).leak();
     let good_parity_blocks = collect_good_indices(parity_corruption, parity_blocks).leak();
 
-    let mut error_indices = data_corruption.iter().copied().chain(parity_corruption.iter().map(|x| *x + data_blocks.as_u64()))
+    let mut error_indices = data_corruption.iter().copied().chain(parity_corruption.iter().map(|x| *x + data_blocks.as_u64().next_power_of_two()))
         // implicit parity zero padding must be included in the error locator, since conceptually the padding is corrupted (zeroed instead of oversampled values)
         .chain(((data_blocks.next_power_of_two() + parity_blocks)..padded_codeword_len).map(|x| x.as_u64()))
         .collect::<Vec<_>>();
@@ -563,7 +563,7 @@ pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_bl
     // remove padding from error indices so that the recovery function doesn't attempt to actually repair the padding
     error_indices.truncate(data_corruption.len() + parity_corruption.len());
 
-    let valid_indices = good_data_blocks.iter().copied().chain(good_parity_blocks.iter().map(|x| *x + data_blocks.as_u64())).collect::<Vec<_>>();
+    let valid_indices = good_data_blocks.iter().copied().chain(good_parity_blocks.iter().map(|x| *x + data_blocks.as_u64().next_power_of_two())).collect::<Vec<_>>();
 
     let iter = |x: &'static [u64]| x.iter().map(|i| *i * block_bytes.as_u64());
 

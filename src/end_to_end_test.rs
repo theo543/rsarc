@@ -38,8 +38,8 @@ pub fn test() {
     println!("Current RNG seed: {}", fastrand::get_seed());
     //fastrand::seed(4483142527918724145); // TODO: fix occasional panics
 
-    let input_size = 1024 * 256; // TODO: fix recovery failure when not a power of 2
-    let block_bytes = 256;
+    let input_size = fastrand::u64(1024 * 1024..1024 * 1024 * 2);
+    let block_bytes = fastrand::usize(1024..4096).next_multiple_of(8);
     let parity_blocks = fastrand::usize(200..300);
 
     gen_test_file(input_size, TEST_FILE_NAME).expect("generating test file");
