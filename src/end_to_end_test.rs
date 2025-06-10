@@ -36,7 +36,6 @@ pub fn test() {
     const OUTPUT_FILE_NAME: &str = "out.rsarc";
 
     println!("Current RNG seed: {}", fastrand::get_seed());
-    //fastrand::seed(4483142527918724145); // TODO: fix occasional panics
 
     let input_size = fastrand::u64(1024 * 1024..1024 * 1024 * 2);
     let block_bytes = fastrand::usize(1024..4096).next_multiple_of(8);

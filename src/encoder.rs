@@ -265,8 +265,15 @@ fn write_data(recv_data: &Receiver<Option<(Buf, usize)>>, return_buf: &Sender<Bu
             let file_idx = base_file_idx.as_usize() + offset;
             if file_idx + 8 <= mapped_data_file.len() {
                 mapped_data_file[file_idx..file_idx + 8].copy_from_slice(&data[parity_idx].to_le_bytes());
+            } else if file_idx < mapped_data_file.len() {
+                // Final value is less than 8 bytes
+                let final_bytes_len = mapped_data_file.len() - file_idx;
+                let final_bytes = data[parity_idx].to_le_bytes();
+                let (final_bytes, padding) = final_bytes.split_at(final_bytes_len);
+                mapped_data_file[file_idx..].copy_from_slice(final_bytes);
+                assert_eq!(padding, &[0; 8][final_bytes_len..], "implicit padding bytes right after file end must be zero");
             } else {
-                assert_eq!(data[parity_idx], 0, "values outside the file must be zero");
+                assert_eq!(data[parity_idx], 0, "implicit padding value outside the file must be zero");
             }
             parity_idx += 1;
         };
