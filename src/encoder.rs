@@ -11,7 +11,6 @@ use positioned_io::{RandomAccessFile, ReadAt};
 
 use crate::header::{format_header, set_meta_hash, Header, HEADER_LEN, HEADER_STRING};
 use crate::math::gf64::{u64_as_gf64, u64_as_gf64_mut, GF64};
-use crate::math::polynomials::{evaluate_poly, newton_interpolation};
 use crate::math::novelpoly::{compute_error_locator_poly, formal_derivative, forward_transform, inverse_transform, precompute_derivative_factors, precompute_transform_factors, DerivativeFactors, TransformFactors};
 use crate::utils::progress::{progress_usize as progress, make_multiprogress, IncIfNotFinished};
 use crate::utils::{get_available_memory, IntoU64Ext, IntoUSizeExt, ZipEqExt};
@@ -211,42 +210,6 @@ fn recovery(chans: WorkerChans,
         chans.send_result.send(Some((recovered_data_buf, code_idx))).unwrap();
         progress.add(1);
         memory.fill(GF64(0));
-    }
-}
-
-fn process_codes(recv_parity_buf: &Receiver<Buf>, send_parity: &Sender<Option<(Buf, usize)>>,
-                 recv_data: &Receiver<Option<ProcessTaskMsg>>, return_data_buf: &Sender<BigBuf>,
-                 data_blocks: usize, parity_blocks: usize,
-                 block_x_values: Option<&Vec<u64>>, output_x_values: Option<&Vec<u64>>,
-                 progress: &ProgressBar) {
-
-    let mut memory = vec![GF64(0); data_blocks * 3];
-    let (poly, memory) = memory.split_at_mut(data_blocks);
-
-    let block_x_values = block_x_values.as_ref().map(|x| u64_as_gf64(x.as_slice()));
-
-    while let Some(ProcessTaskMsg{buf, reader_count, offset, code_idx, codes}) = recv_data.recv().unwrap() {
-        let locked_buf = buf.try_read().unwrap();
-        newton_interpolation(u64_as_gf64(&locked_buf[0..codes * data_blocks]), offset, codes, block_x_values, poly, memory);
-        drop(locked_buf);
-        let is_last = reader_count.fetch_sub(1, Ordering::SeqCst) == 1;
-        if is_last {
-            assert!(buf.try_write().is_ok());
-            return_data_buf.send(buf).unwrap();
-        }
-        let mut parity_buf = recv_parity_buf.recv().unwrap();
-        assert_eq!(parity_buf.len(), parity_blocks);
-        if let Some(output_x_values) = output_x_values {
-            for (x, y) in u64_as_gf64(output_x_values).iter().zip_eq(u64_as_gf64_mut(&mut parity_buf)) {
-                *y = evaluate_poly(poly, *x);
-            }
-        } else {
-            for (x, y) in u64_as_gf64_mut(&mut parity_buf).iter_mut().enumerate() {
-                *y = evaluate_poly(poly, GF64((data_blocks + x).as_u64()));
-            }
-        }
-        send_parity.send(Some((parity_buf, code_idx))).unwrap();
-        progress.add(1);
     }
 }
 
