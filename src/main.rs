@@ -19,7 +19,7 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|x| x.as_str()).unwrap_or("test") {
-        "test" => end_to_end_test::test(),
+        "test" => end_to_end_test::test().unwrap(),
 
         "encode" => {
             if args.len() != 6 {

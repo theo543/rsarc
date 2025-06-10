@@ -1,4 +1,4 @@
-use std::{fs::OpenOptions, io::{BufWriter, Write}};
+use std::{fs::OpenOptions, io::{self, BufWriter, Write}};
 
 use positioned_io::WriteAt;
 
@@ -27,11 +27,11 @@ pub fn gen_test_file(file_size: u64, name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn hash_file(file: &str) -> blake3::Hash {
-    blake3::hash(std::fs::read(file).unwrap().as_slice())
+fn hash_file(file: &str) -> io::Result<blake3::Hash> {
+    Ok(blake3::hash(std::fs::read(file)?.as_slice()))
 }
 
-pub fn test() {
+pub fn test() -> io::Result<()> {
     const TEST_FILE_NAME: &str = "test.txt";
     const OUTPUT_FILE_NAME: &str = "out.rsarc";
 
@@ -43,43 +43,44 @@ pub fn test() {
 
     gen_test_file(input_size, TEST_FILE_NAME).expect("generating test file");
 
-    let test_file_hash = hash_file(TEST_FILE_NAME);
+    let test_file_hash = hash_file(TEST_FILE_NAME)?;
 
-    let mut input = OpenOptions::new().read(true).share_mode_lock().open(TEST_FILE_NAME).unwrap();
-    let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open(OUTPUT_FILE_NAME).unwrap();
+    let mut input = OpenOptions::new().read(true).share_mode_lock().open(TEST_FILE_NAME)?;
+    let mut output = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode_lock().open(OUTPUT_FILE_NAME)?;
 
     let start_time = std::time::Instant::now();
-    encode(&mut input, &mut output, EncodeOptions{block_bytes, parity_blocks}).unwrap();
+    encode(&mut input, &mut output, EncodeOptions{block_bytes, parity_blocks})?;
     println!("Time: {:?}", start_time.elapsed());
 
-    let output_file_hash = hash_file(OUTPUT_FILE_NAME);
+    let output_file_hash = hash_file(OUTPUT_FILE_NAME)?;
 
-    verify(&mut input, &mut output).unwrap().report_corruption(true);
+    verify(&mut input, &mut output)?.report_corruption(true);
 
     drop(input);
-    let mut input = OpenOptions::new().read(true).write(true).share_mode_lock().open(TEST_FILE_NAME).unwrap();
+    let mut input = OpenOptions::new().read(true).write(true).share_mode_lock().open(TEST_FILE_NAME)?;
 
-    let input_len = input.metadata().unwrap().len();
-    let output_len = output.metadata().unwrap().len();
+    let input_len = input.metadata()?.len();
+    let output_len = output.metadata()?.len();
     let metadata_bytes = HEADER_LEN.as_u64() + (input_len.div_ceil(block_bytes.as_u64()) + parity_blocks.as_u64()) * 40;
 
     for _ in 0..parity_blocks.div_ceil(2) {
         let corrupt = fastrand::u64(0..input_len);
-        input.write_all_at(corrupt, &[0; 1]).unwrap();
+        input.write_all_at(corrupt, &[0; 1])?;
     }
 
     for _ in 0..parity_blocks / 2 {
         let corrupt = fastrand::u64(metadata_bytes..output_len);
-        output.write_all_at(corrupt, &[0; 1]).unwrap();
+        output.write_all_at(corrupt, &[0; 1])?;
     }
 
-    let corruption = verify(&mut input, &mut output).unwrap();
+    let corruption = verify(&mut input, &mut output)?;
     corruption.report_corruption(false);
     let VerifyResult::Ok{data_errors: data_file, parity_errors: parity_file, header} = corruption else { panic!("metadata should not be corrupted") };
-    repair(&mut input, &mut output, header, data_file, parity_file).unwrap();
+    repair(&mut input, &mut output, header, data_file, parity_file)?;
 
-    verify(&mut input, &mut output).unwrap().report_corruption(true);
+    verify(&mut input, &mut output)?.report_corruption(true);
 
-    assert_eq!(test_file_hash, hash_file(TEST_FILE_NAME));
-    assert_eq!(output_file_hash, hash_file(OUTPUT_FILE_NAME));
+    assert_eq!(test_file_hash, hash_file(TEST_FILE_NAME)?);
+    assert_eq!(output_file_hash, hash_file(OUTPUT_FILE_NAME)?);
+    Ok(())
 }
