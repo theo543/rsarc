@@ -1,4 +1,4 @@
-use std::{fs::OpenOptions, io::{self, BufWriter, Write}};
+use std::{fs::OpenOptions, io::{self, BufWriter, Read, Write}};
 
 use positioned_io::WriteAt;
 
@@ -17,7 +17,9 @@ pub fn gen_test_file(file_size: u64, name: &str) -> std::io::Result<()> {
     let chunks = file_size / chunk_size as u64;
     for i in 0..chunks {
         write!(test_file, "{i:0d$}{TEXT}", d = digits)?;
-        p.inc(chunk_size as u64);
+        if i % 256 == 0 {
+            p.inc(chunk_size as u64 * 256);
+        }
     }
     test_file.write_all(&vec![b'\n'; (file_size % chunk_size as u64) as usize])?;
 
@@ -28,7 +30,17 @@ pub fn gen_test_file(file_size: u64, name: &str) -> std::io::Result<()> {
 }
 
 fn hash_file(file: &str) -> io::Result<blake3::Hash> {
-    Ok(blake3::hash(std::fs::read(file)?.as_slice()))
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = vec![0; 1024 * 1024 * 256];
+    let mut file = OpenOptions::new().read(true).open(file)?;
+    loop {
+        let bytes = file.read(&mut buffer)?;
+        if bytes == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes]);
+    }
+    Ok(hasher.finalize())
 }
 
 pub fn test() -> io::Result<()> {

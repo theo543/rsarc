@@ -40,7 +40,7 @@ struct ReadDataMsg {
 trait BlockIndices: ExactSizeIterator<Item = u64> + Send + Clone {}
 impl<T: ExactSizeIterator<Item = u64> + Send + Clone> BlockIndices for T {}
 
-fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: impl BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8]) -> io::Result<bool> {
+fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: impl BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8], progress: &ProgressBar) -> io::Result<bool> {
     let mut incomplete_read_occurred = false;
     for base_file_idx in indices {
         let file_idx = base_file_idx + offset;
@@ -59,6 +59,7 @@ fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, i
             }
         }
         *buf_idx += symbols_bytes;
+        progress.inc(1);
     }
     Ok(incomplete_read_occurred)
 }
@@ -85,8 +86,8 @@ fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>
         single_progress.reset();
         let mut buf_idx = 0;
         let offset = code_idx.as_u64() * 8;
-        read_symbols_from_file(&input, input_file_size, offset, good_indices.0.clone(), bytes_in_read, &mut buf_idx, buf_u8)?;
-        let incomplete_output_read = read_symbols_from_file(&output, output_file_size, offset, good_indices.1.clone(), bytes_in_read, &mut buf_idx, buf_u8)?;
+        read_symbols_from_file(&input, input_file_size, offset, good_indices.0.clone(), bytes_in_read, &mut buf_idx, buf_u8, single_progress)?;
+        let incomplete_output_read = read_symbols_from_file(&output, output_file_size, offset, good_indices.1.clone(), bytes_in_read, &mut buf_idx, buf_u8, single_progress)?;
         assert!(!incomplete_output_read, "output file contains only full blocks");
         single_progress.finish();
 
@@ -256,26 +257,29 @@ pub struct EncodeOptions {
     pub parity_blocks: usize,
 }
 
-struct PerfParams {
+struct BufParams {
     two_bigbuf: bool,
     codes_read_at_once: usize,
 }
 
-fn choose_cpus_and_mem(threads: usize, input_blocks: usize, output_blocks: usize, block_symbols: usize) -> PerfParams {
+fn choose_buf_size(threads: usize, good_blocks: usize, bad_blocks: usize, block_symbols: usize, memory_per_thread: usize) -> BufParams {
     const MEM_USE_PERCENT: u64 = 90;
-    const MAX_CODES: u64 = 16284;
+    const MAX_CODES: u64 = 65536;
 
     let available_memory = ((get_available_memory() * MEM_USE_PERCENT) / 100)
-    .saturating_sub((input_blocks * 3 * 8 * threads).as_u64()) // substract memory used by processor threads (interpolation memory, polynomial)
-    .saturating_sub((output_blocks * 8).as_u64()); // substract memory used for output buffers
+    .saturating_sub((memory_per_thread * threads).as_u64()) // substract memory used by processor threads (interpolation memory, polynomial)
+    .saturating_sub((bad_blocks * 8).as_u64()) // substract memory used for output buffers
+    .max(1);
 
-    let codes_read_at_once = available_memory / input_blocks.as_u64() * 8 * 2;
+    let codes_read_at_once = available_memory.div_ceil(good_blocks.as_u64() * 8 * 2);
 
-    let (two_bigbuf, codes_read_at_once) = if available_memory >= (input_blocks * block_symbols * 8).as_u64() { (false, block_symbols) }
-        else if codes_read_at_once > MAX_CODES { ((codes_read_at_once / MAX_CODES).clamp(1, 2) == 2, MAX_CODES as usize) } else { (true, (codes_read_at_once / 2) as usize) };
+    let (two_bigbuf, codes_read_at_once) =
+        if available_memory >= (good_blocks * block_symbols * 8).as_u64() { (false, block_symbols) } // entire file fits in memory
+        else if codes_read_at_once > MAX_CODES { (codes_read_at_once >= MAX_CODES * 2, MAX_CODES.as_usize()) } // read MAX_CODES per pass, if there's enough memory create two read buffers to allow reading while processing
+        else { (false, codes_read_at_once as usize) }; // just read as many codes as possible per pass
 
-    println!("Using {threads} CPUs, {two_bigbuf} buffers, reading {} bytes per reading pass ({codes_read_at_once} symbols per code)", codes_read_at_once * 8 * input_blocks);
-    PerfParams {two_bigbuf, codes_read_at_once}
+    println!("Using {threads} CPUs, reading {} bytes per reading pass ({codes_read_at_once} symbols per block)", codes_read_at_once * 8 * good_blocks);
+    BufParams {two_bigbuf, codes_read_at_once}
 }
 
 fn internal_encode_pipeline(
@@ -285,10 +289,11 @@ fn internal_encode_pipeline(
         output_block_indices: (impl BlockIndices, impl BlockIndices),
         input_map: &mut [u8], parity_map: &mut [u8],
         spawn_processor_thread: &(dyn Fn(WorkerChans, &ProgressBar) + Sync),
+        memory_per_thread: usize,
     ) -> io::Result<()> {
 
     let cpus = num_cpus::get();
-    let PerfParams{two_bigbuf, codes_read_at_once} = choose_cpus_and_mem(cpus, good_blocks, bad_blocks, block_symbols);
+    let BufParams{two_bigbuf, codes_read_at_once} = choose_buf_size(cpus, good_blocks, bad_blocks, block_symbols, memory_per_thread);
 
     // create channels
     let data_to_adapter = unbounded();
@@ -307,7 +312,7 @@ fn internal_encode_pipeline(
         return_result_buf.0.send(vec![0; bad_blocks].into_boxed_slice()).unwrap();
     }
 
-    let single = progress(good_blocks * codes_read_at_once, "one read pass");
+    let single = progress(good_blocks, "one read pass");
     let read_prog = progress(block_symbols, "read");
     let process_prog = progress(block_symbols, "process");
     let write_prog = progress(block_symbols, "write");
@@ -419,6 +424,7 @@ pub fn encode(input: &mut File, output: &mut File, EncodeOptions { block_bytes, 
         (std::iter::empty(), (0..parity_blocks).map(|x| x.as_u64() * block_bytes.as_u64())),
         &mut [], parity_map,
         &|chans, progress| oversample(chans, data_blocks, padded_data_blocks, &factors, progress),
+        padded_data_blocks,
     )?;
 
     let (data_hashes, parity_hashes) = hashes_map.split_at_mut(40 * data_blocks);
@@ -544,7 +550,8 @@ pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_bl
         (iter(good_data_blocks), iter(good_parity_blocks).map(|x| x + metadata_bytes.as_u64())),
         (iter(data_corruption), iter(parity_corruption)),
         &mut input_map, &mut output_map[metadata_bytes..],
-        &|chans, progress| recovery(chans, padded_codeword_len, &t_factors, &d_factors, &error_indices, &valid_indices, &err_locator, &err_locator_derivative, progress)
+        &|chans, progress| recovery(chans, padded_codeword_len, &t_factors, &d_factors, &error_indices, &valid_indices, &err_locator, &err_locator_derivative, progress),
+        padded_codeword_len,
     )?;
 
     input_map.flush()?;
