@@ -4,9 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-# default = ["gf64_stats"]
 gf64_stats = []
-io_benchmark_no_interpolation = []
 
 [dependencies]
 fastrand = "2.3.0"
