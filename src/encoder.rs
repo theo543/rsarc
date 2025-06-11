@@ -37,10 +37,10 @@ struct ReadDataMsg {
     codes: usize // last message may have less codes
 }
 
-trait BlockIndices: ExactSizeIterator<Item = u64> + Send + Clone {}
-impl<T: ExactSizeIterator<Item = u64> + Send + Clone> BlockIndices for T {}
+trait BlockIndices<'a>: ExactSizeIterator<Item = u64> + Send + Clone {}
+impl<'a, T: ExactSizeIterator<Item = u64> + Send + Clone + 'a> BlockIndices<'a> for T {}
 
-fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, indices: impl BlockIndices, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8], progress: &ProgressBar) -> io::Result<bool> {
+fn read_symbols_from_file<'a>(file: &RandomAccessFile, file_len: u64, offset: u64, indices: impl BlockIndices<'a>, symbols_bytes: usize, buf_idx: &mut usize, buf: &mut [u8], progress: &ProgressBar) -> io::Result<bool> {
     let mut incomplete_read_occurred = false;
     for base_file_idx in indices {
         let file_idx = base_file_idx + offset;
@@ -64,10 +64,10 @@ fn read_symbols_from_file(file: &RandomAccessFile, file_len: u64, offset: u64, i
     Ok(incomplete_read_occurred)
 }
 
-fn read_data(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>,
+fn read_data<'a>(recv_buf: &Receiver<BigBuf>, send_buf: &Sender<Option<ReadDataMsg>>,
              block_symbols: usize, codes_per_full_read: usize,
              input: &mut File, output: &mut File,
-             good_indices: (impl BlockIndices, impl BlockIndices),
+             good_indices: (impl BlockIndices<'a>, impl BlockIndices<'a>),
              progress: &ProgressBar, single_progress: &ProgressBar) -> io::Result<()> {
 
     let input_file_size = input.metadata()?.len();
@@ -214,9 +214,9 @@ fn recovery(chans: WorkerChans,
     }
 }
 
-fn write_data(recv_data: &Receiver<Option<(Buf, usize)>>, return_buf: &Sender<Buf>,
+fn write_data<'a>(recv_data: &Receiver<Option<(Buf, usize)>>, return_buf: &Sender<Buf>,
               mapped_data_file: &mut [u8], mapped_parity_file: &mut [u8],
-              output_indices: (impl BlockIndices, impl BlockIndices),
+              output_indices: (impl BlockIndices<'a>, impl BlockIndices<'a>),
               progress: &ProgressBar) -> io::Result<()> {
 
     loop {
@@ -282,11 +282,11 @@ fn choose_buf_size(threads: usize, good_blocks: usize, bad_blocks: usize, block_
     BufParams {two_bigbuf, codes_read_at_once}
 }
 
-fn internal_encode_pipeline(
+fn internal_encode_pipeline<'a>(
         input: &mut File, output: &mut File,
         good_blocks: usize, bad_blocks: usize, block_symbols: usize,
-        input_block_indices: (impl BlockIndices, impl BlockIndices),
-        output_block_indices: (impl BlockIndices, impl BlockIndices),
+        input_block_indices: (impl BlockIndices<'a>, impl BlockIndices<'a>),
+        output_block_indices: (impl BlockIndices<'a>, impl BlockIndices<'a>),
         input_map: &mut [u8], parity_map: &mut [u8],
         spawn_processor_thread: &(dyn Fn(WorkerChans, &ProgressBar) + Sync),
         memory_per_thread: usize,
@@ -521,11 +521,8 @@ pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_bl
     let mut input_map = unsafe { MmapOptions::new().map_mut(&*input)? };
     let mut output_map = unsafe { MmapOptions::new().map_mut(&*output)? };
 
-    // TODO: remove use of leak
-    let data_corruption = data_corruption.leak();
-    let parity_corruption = parity_corruption.leak();
-    let good_data_blocks = collect_good_indices(data_corruption, data_blocks).leak();
-    let good_parity_blocks = collect_good_indices(parity_corruption, parity_blocks).leak();
+    let good_data_blocks = collect_good_indices(&data_corruption, data_blocks);
+    let good_parity_blocks = collect_good_indices(&parity_corruption, parity_blocks);
 
     let mut error_indices = data_corruption.iter().copied().chain(parity_corruption.iter().map(|x| *x + data_blocks.as_u64().next_power_of_two()))
         // implicit parity zero padding must be included in the error locator, since conceptually the padding is corrupted (zeroed instead of oversampled values)
@@ -541,14 +538,14 @@ pub fn repair(input: &mut File, output: &mut File, Header { block_bytes, data_bl
 
     let valid_indices = good_data_blocks.iter().copied().chain(good_parity_blocks.iter().map(|x| *x + data_blocks.as_u64().next_power_of_two())).collect::<Vec<_>>();
 
-    let iter = |x: &'static [u64]| x.iter().map(|i| *i * block_bytes.as_u64());
+    let bb = block_bytes.as_u64();
 
     internal_encode_pipeline(
         input, output,
         good_blocks, bad_blocks, block_bytes / 8,
         // good_parity_blocks is offset by metadata bytes because reading does not use the memory maps, so slicing output_map by metadata_bytes does not help good_parity_blocks skip the metadata
-        (iter(good_data_blocks), iter(good_parity_blocks).map(|x| x + metadata_bytes.as_u64())),
-        (iter(data_corruption), iter(parity_corruption)),
+        (good_data_blocks.iter().map(|x| x * bb), good_parity_blocks.iter().map(|x| x * bb + metadata_bytes.as_u64())),
+        (data_corruption.iter().map(|x| x * bb), parity_corruption.iter().map(|x| x * bb)),
         &mut input_map, &mut output_map[metadata_bytes..],
         &|chans, progress| recovery(chans, padded_codeword_len, &t_factors, &d_factors, &error_indices, &valid_indices, &err_locator, &err_locator_derivative, progress),
         padded_codeword_len,
