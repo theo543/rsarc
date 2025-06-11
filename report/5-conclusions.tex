@@ -1,44 +1,9 @@
 \chapter{Conclusions}
 
-\section{Summary}
-
 The file metadata is currently not protected from corruption.
 This can be addressed by adding meta-parity blocks among the parity blocks.
-Although the metadata is generally small, this is a significant flaw in the current implementation.
+Although the metadata is generally small, and therefore unlikely to be corrupted, this is a significant flaw in the current implementation.
 
 The implementation can successfully generate parity data and repair file corruption using Reed-Solomon codes in $O(n \log n)$ time.
 
-Correctness is ensured using unit tests for the side-effect free part of the implementation - the finite field arithmetic and polynomial algorithms - and end-to-end testing for the entire encoding and decoding sequence, using simulated file corruption.
-
-\pagebreak
-
-\section{Figures}
-
-% TODO: move this section to an annex
-
-As a final note, and to visually demonstrate some limitations of this error correction scheme,
-the following figures show the use of Reed-Solomon codes to repair bitmap images.
-
-Figure B is impossible to repair, yet figure A has more errors.
-This is because the errors in figure A are contiguous - they are burst errors - so they affect less blocks.
-
-Figure C is the recovered image from figure A.
-
-See the script \texttt{generate\_figures.py} for how these images were generated.
-
-\begin{figure}[H]
-    \centering
-    \begin{subcaptionbox}{A bitmap image with repairable errors.}
-        {\includegraphics[width=0.3\textwidth]{face_2.png}}
-    \end{subcaptionbox}
-    \hfill
-    \begin{subcaptionbox}{A bitmap image with irreparable errors.}
-        {\includegraphics[width=0.3\textwidth]{face_3.png}}
-    \end{subcaptionbox}
-    \hfill
-    \begin{subcaptionbox}{Figure A, repaired.}
-        {\includegraphics[width=0.3\textwidth]{face_2_repaired.png}}
-    \end{subcaptionbox}
-    
-    \caption{Image source: \texttt{scipy.datasets.face}.}
-\end{figure}
+Correctness is ensured using unit tests for the IO-free part of the implementation - the finite field arithmetic and polynomial algorithms - and end-to-end testing for the entire encoding and decoding sequence, using simulated file corruption.
