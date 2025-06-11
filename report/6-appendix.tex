@@ -1,8 +1,9 @@
 \appendix
 \appendixpage
+\renewcommand{\thesection}{A.\arabic{section}}
 \addappheadtotoc
 
-\chapter{Recovery Figures}
+\section{Recovery Figures}
 \label{appendix:bitmap-errors}
 
 To visually demonstrate some limitations of this error correction scheme, the following figures show the use of Reed-Solomon codes to repair bitmap images.
@@ -29,9 +30,27 @@ This is because the errors in figure (a) are one contiguous burst, whereas the e
 
 \clearpage
 
-\section{Image Generation Script}
+\subsection{Image Generation Script}
 
-\tiny
+\begin{tiny}
 \lstinputlisting[language=Python, showstringspaces=false]{generate_figures.py}
+\end{tiny}
 
 \clearpage
+
+\section{Dependencies}
+
+\label{appendix:dependencies}
+
+The following Rust libraries were used in the implementation:
+
+\begin{itemize}
+    \item \texttt{fastrand} - Random number generation for testing.
+    \item \texttt{blake3} - Hashing for error detection.
+    \item \texttt{crossbean-channel} - Channels for communication between threads. Although the standard library provides channels, multi-producer multi-consumer channels are not stabilized yet (as of Rust 1.87.0).
+    \item \texttt{indicatif} - Terminal progress bars.
+    \item \texttt{memmap2} - Cross-platform memory mapped I/O.
+    \item \texttt{num\_cpus} - Obtains of CPU cores for automatically selecting number of threads.
+    \item \texttt{positioned-io} - Cross-platform random access file I/O.
+    \item \texttt{sysinfo} - Obtains available memory for automatically selecting number of codes to process at once.
+\end{itemize}
