@@ -3,6 +3,24 @@
 The implementation is written in Rust, using some third-party libraries for I/O, multithreading, hashing, and progress reporting. No libraries were used for the finite field arithmetic, polynomial operations, or Reed-Solomon codes.
 % TODO: mention libraries used in an annex
 
+\section{Interleaved Codes}
+
+The data and parity files are not treated as one single Reed-Solomon codeword.
+Instead, the data is split into blocks. The blocks are \textit{not} independent Reed-Solomon codes, but rather the codes are split across all blocks, with each block containing one symbol from each code.
+In other words, the files are treated as matrices, with the blocks as rows and codes as columns.
+
+This is necessary for several reasons:
+\begin{itemize}
+    \item Using one large Reed-Solomon code would require reading all data into memory, limiting the maximum size to the available memory, or requiring complicated saving and loading to disk as part of the processing.
+    \item The precomputed factors for one large code would be as large as the code itself, requiring large amounts of time and space to compute and store.
+    \item Since hashes are used to detect corruption, the file must be split into blocks anyways, limiting the granularity of error correction to the block size.
+\end{itemize}
+
+Any error occuring in a block will affect all codes, as deleting a row from a matrix affects one element of each column.
+Multiple errors in one block have the same effect as a single error. This is suited to common error patterns, which tend not to be uniformly distributed, but intead are burst errors.
+
+See appendix \ref{appendix:bitmap-errors} for an visual example of how burst errors are easier to correct.
+
 \section{Data Storage}
 
 The parity data and metadata are stored in a separate file, specified by the user.
