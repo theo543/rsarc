@@ -1,0 +1,65 @@
+\chapter{Implementation}
+
+The implementation is written in Rust, using some third-party libraries for I/O, multithreading, hashing, and progress reporting. No libraries were used for the finite field arithmetic, polynomial operations, or Reed-Solomon codes.
+% TODO: mention libraries used in an annex
+
+\section{Data Storage}
+
+The parity data and metadata are stored in a separate file, specified by the user.
+
+The metadata consists of the header, which specifies the parameters of the encoding - expected data file size, number of data and parity blocks, and block size - and hashes of all blocks, used to detect corruption.
+The hashes also include the first 8 bytes of each block, to allow reassembly if the blocks are somehow scrambled, such as by deletion or insertion of a byte. This is very unlikely to happen, but would cause complete failure without a way to put the blocks back in order.
+
+As the Reed-Solomon codes are split across all blocks, reading and writing the data and parity files has a very inefficient access pattern, as reading one code requires one access to each block.
+The blocks are analogous to rows in a matrix, and the codes to columns. Processing a matrix stored in row-major order column-wise is inherently inefficient, since non-contiguous memory access is required.
+
+The system call overhead and seek time can be somewhat mitigated by reading many symbols per block at once, as many as can fit into memory.
+This produces a large buffer of interleaved symbols, which can then be processed in memory.
+
+Reducing the length of individual codes by increasing block size improves performance, since it allows reading more symbols at once, and therefore passing through the data file fewer times.
+However, there is still a penalty for the non-contiguous access, especially on a hard disk drive.
+
+The worst case scenario is if there is not enough memory to read more than one code at once, since this will require one system call per symbol.
+In this case, the only option is to increase the block size, which reduces code length, allowing more symbols to be read at once.
+This theoretically reduces the granularity of the error correction, causing a single-byte error to render large amounts of data useless for recovery, but since burst errors are most common, this is acceptable.
+
+The performance could also be improved by splitting a file into small sections which fit into memory, but the sections would be independent and could not be used to repair each other.
+
+Writing is implemented using memory mapped I/O, which is simpler to use, but relies completely on the operating system to batch writes to the disk.
+
+Since the data symbols from each code are read in batches - many codes read from each block per pass through the data file - the writes will naturally be batched as well.
+Testing does not show a bottleneck in writing.
+If necessary, the batching could be done manually, collecting output symbols in a large buffer and using normal write calls, instead of memory mapped I/O.
+
+The same I/O code is used for both encoding and decoding.
+When decoding, system calls are used to read uncorrupted symbols from both files, and memory mapped I/O is used to write recovered symbols to both files.
+The architecture could be extended to process an arbitrary number of files, such as multiple parity files, single-file archives combining data and parity, or arbitrary folder structures as data instead of a single file.
+
+\section{Multithreaded Processing}
+
+To process codes in parallel, a multithreaded pipeline is used, consisting of a reader thread, an adapter thread, multiple processor threads, and a writer thread.
+
+The reader thread reads codes into an interleaved buffer as described in the previous section.
+The processor threads execute the encoding or decoding algorithm, writing the output symbols into a buffer which is sent to the writer thread.
+The writer thread simply copies symbols from received buffers into the output memory maps, allowing the operating system to flush pages to disk asynchronously.
+
+In order to synchronize the threads, channels are used to send messages between them. Heap-allocated buffers are used to store input and output data, moving input data from reader to adapter to processor, and output data from processor to writer.
+
+Used input buffers are returned back to the reader and output buffers returned to the processors using separate return channels.
+
+Filled input buffers are sent by the reader to the adapter, which creates a task message for each code in the buffer and sends it to the processor threads through a shared channel, including an offset which specifies which code to read from the buffer,
+and a shared atomic counter which is decremented whenever a processor thread finishes processing a code, so that when every code has been processed, the input buffer is sent back to the reader to be reused.
+
+There are five channels used in total for the following purposes:
+\begin{itemize}
+    \item Sending filled input buffers from the reader to the adapter, along with the number of codes and the index of the first code.
+    \item Sending task messages from the adapter to the processors, containing a reference to the input buffer, a shared atomic counter, the index of the code, offset into the buffer, and number of codes in the buffer.
+    \item Sending filled output buffers from the processors to the writer, along with the index of the code.
+    \item Returning input buffers to the reader after every code has been processed, which is done by decrementing the shared atomic counter and returning the buffer when it reaches zero.
+    \item Returning output buffers to the processors after the output symbols have been copied to the memory maps by the writer.
+\end{itemize}
+
+The input buffers are protected by a read-write lock, which allows multiple processors to read codes from the buffer at once, but only one thread - the reader - can write to it at a time.
+This is only used to ensure thread-safety, not for synchronization, which is done only using channels and the atomic counters.
+
+The processor threads share the same precomputed factors, which depending on the task are either transform factors at multiple offsets for encoding, or transform factors plus derivative factors and the error locator polynomial for decoding.

@@ -2,16 +2,13 @@
 
 \section{Summary}
 
-The implementation can successfully generate parity data and repair file corruption using Reed-Solomon codes.
-
 The file metadata is currently not protected from corruption.
 This can be addressed by adding meta-parity blocks among the parity blocks.
 Although the metadata is generally small, this is a significant flaw in the current implementation.
 
-Only a single data file and parity file are supported. Multiple input files and single-file archives would be a useful feature to add.
-This would require significal re-architecting of the program's I/O in order to read and write blocks to arbitrary files in arbitrary folder structures.
-The file header of the parity file would need to be extended to include relative paths to the data files.
-Single-file archives would be less difficult to add.
+The implementation can successfully generate parity data and repair file corruption using Reed-Solomon codes in $O(n \log n)$ time.
+
+Correctness is ensured using unit tests for the side-effect free part of the implementation - the finite field arithmetic and polynomial algorithms - and end-to-end testing for the entire encoding and decoding sequence, using simulated file corruption.
 
 \pagebreak
 
