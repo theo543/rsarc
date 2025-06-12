@@ -16,8 +16,8 @@ This is necessary for several reasons:
     \item Since hashes are used to detect corruption, the file must be split into blocks anyways, limiting the granularity of error correction to the block size.
 \end{itemize}
 
-Any error occuring in a block will affect all codes, as deleting a row from a matrix affects one element of each column.
-Multiple errors in one block have the same effect as a single error. This is suited to common error patterns, which tend not to be uniformly distributed, but intead are burst errors.
+Any error occurring in a block will affect all codes, as deleting a row from a matrix affects one element of each column.
+Multiple errors in one block have the same effect as a single error. This is suited to common error patterns, which tend not to be uniformly distributed, but instead are burst errors.
 
 See appendix \ref{appendix:bitmap-errors} for an visual example of how burst errors are easier to correct.
 

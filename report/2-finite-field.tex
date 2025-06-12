@@ -3,7 +3,7 @@
 As previously mentioned, Reed-Solomon codes require the use of non-standard arithmetic - arithmetic over finite fields - because modular arithmetic with a non-prime modulus does not have an inverse for all elements.
 
 Addition in \GF{64} is extremely simple, as it is equivalent to XOR.
-Multiplication, however, is less efficient than standard multiplication, and divison even less so.
+Multiplication, however, is less efficient than standard multiplication, and division even less so.
 
 The constant $\text{POLYNOMIAL}$ refers to the irreducible polynomial $x^{64} + x^4 + x^3 + x + 1$, with $x^{64}$ omitted, as it would not fit in a 64-bit integer.
 
