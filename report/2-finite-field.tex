@@ -1,29 +1,102 @@
-\chapter{Finite Field Arithmetic}
+\chapter{Reed-Solomon Codes and Finite Fields}
 
-As previously mentioned, Reed-Solomon codes require the use of non-standard arithmetic - arithmetic over finite fields - because modular arithmetic with a non-prime modulus does not have an inverse for all elements.
+\section{Reed-Solomon Codes}
 
-Addition in \GF{64} is extremely simple, as it is equivalent to XOR.
-Multiplication, however, is less efficient than standard multiplication, and division even less so.
+Reed-Solomon codes are a well-known class of error-correcting codes used in a wide range of applications, from data storage to radio communication.
+They are based on polynomials over finite fields. \cite{theory-of-error-correcting-codes}
 
-The constant $\text{POLYNOMIAL}$ refers to the irreducible polynomial $x^{64} + x^4 + x^3 + x + 1$, with $x^{64}$ omitted, as it would not fit in a 64-bit integer.
+The code used for this project is an erasure code over the field \GF{64}, implemented using $O(n \log n)$ algorithms introduced in \cite{novel-poly}.
 
-\section{Russian Peasant Algorithm}
+The basic working principle of this type of Reed-Solomon code is the interpretation of data as values of a polynomial evaluated at points ${\omega_0, \omega_1, \ldots, \omega_{k - 1}}$ in a finite field $\text{GF}(2^n)$.
+The polynomial is interpolated and evaluated to obtain additional points, which are the parity information used to correct errors.
+The combination of data and parity points is called a codeword.
+
+As there is only one polynomial of degree $k - 1$ or smaller passing through $k$ points, any combination of at least $k$ of the original and redundant points uniquely determines the original polynomial.
+
+Because each point must have a different x-coordinate, the field size limits how much data and redundancy a single codeword can contain. In \GF{64}, the limit is effectively infinite.
+
+An erasure code is a type of error-correcting code which requires that the locations of corrupted data are known.
+The code cannot be used to discover the locations of corrupted data by itself.
+In this case, hashes stored in the metadata of the parity file are used to determine error locations.
+
+Other Reed-Solomon codes do locate errors without requiring hashes, but they are not used in this project, as hashes are a simpler and more efficient solution.
+
+One common code is $\text{RS}(255, 223)$, which is used in CDs and DVDs, and uses 8-bit symbols (in the field $\text{GF}(2^8)$).
+The notation $\text{RS}(n, k)$ denotes a code with $n$ total symbols, with $k$ data symbols and $n - k$ parity symbols.
+The code used in this project has no fixed $n$ or $k$, they are specified by the user.
+
+The code used in this project is also systematic, meaning that the original data is included in the output.
+Non-systematic codes do not include the original data, so the receiver must decode the received codeword to obtain the original data, even if no corruption occurred.
+
+\section{Finite Fields}
+
+Finite fields, also known as Galois fields, are mathematical structures which define addition, multiplication, subtraction, and division over a finite set of elements \cite{finite-fields-2nd-ed}
+(as opposed to the better-known infinite fields, such as the rationals, reals, and complex numbers).
+
+A field must satisfy the following properties:
+
+\begin{itemize}[nosep]
+    \item Associativity of addition and multiplication: $(a + b) + c = a + (b + c)$ and $(a \cdot b) \cdot c = a \cdot (b \cdot c)$
+    \item Commutativity of addition and multiplication: $a + b = b + a$ and $a \cdot b = b \cdot a$
+    \item Additive and multiplicative identity elements: $a + 0 = a$ and $a \cdot 1 = a$
+    \item Additive inverses: for every $a$, there exists $-a$ such that $a + (-a) = 0$
+    \item Multiplicative inverses: for every $a \neq 0$, there exists $a^{-1}$ such that $a \cdot a^{-1} = 1$
+    \item Distributivity of multiplication over addition: $a \cdot (b + c) = a \cdot b + a \cdot c$
+\end{itemize}
+
+The theorems of polynomial mathematics used in Reed-Solomon codes only hold in a field, however standard computer arithmetic does not form a field.
+Typical arithmetic supported natively by CPUs is fixed-size binary arithmetic with overflow, which is equivalent to arithmetic modulo a power of 2.
+Modular arithmetic only forms a field with a prime modulus, so it cannot be used directly for Reed-Solomon codes.
+
+For example, the operation $x \cdot 2$ is not invertible, as it is equivalent to a left shift, from which the most significant bit of $x$ cannot be recovered.
+
+Fortunately, it is possible to construct a field based on fixed-size integers, such as 64-bit integers.
+
+In a finite field $\text{GF}(p^m)$, where $p$ is a prime number and $m$ is a positive integer, the elements are polynomials of degree $m - 1$, with coefficients in $\text{GF}(p)$.
+For the \GF{n} case, an element in the field is a polynomial with $n$ coefficients, where each coefficient is a bit (i.e. a value in $\text{GF}(2)$ = $\{0, 1\}$).
+For the purposes of this project, $n$ is always 64, so the field is \GF{64}.
+
+The notation $\omega_i$ is used to denote the integer $i$ converted to an element of the field \GF{64} by interpreting its bits as a polynomial, which is a no-op in code, as elements of \GF{64} are stored as 64-bit integers.
+
+It is important to note that these polynomials are not the same as the ones used in Reed-Solomon codes to represent data and parity information.
+Elements of \GF{n} are simply $n$ bit integers with more complex arithmetic. They are polynomials over $\text{GF}(2)$, with $n$ coefficients.
+Reed-Solomon polynomials can be arbitrarily long. They are polynomials over \GF{64}, with an arbitrary number of coefficients, and each coefficient is itself a polynomial over \GF{2} with $64$ coefficients.
+
+Finite field addition is defined as polynomial addition.
+In a general field $\text{GF}(p^m)$, this would be implemented as pairwise addition of the coefficients of two polynomials, modulo $p$.
+
+In binary finite fields, addition is equivalent to XOR, as the coefficients are bits. Therefore, $x + x = 0$, and $x = -x$ (the field has characteristic 2).
+
+Multiplication is defined as polynomial multiplication, followed by reduction modulo an irreducible polynomial of degree 64 (with $65$ coefficients, where the highest coefficient is $1$).
+
+The irreducible polynomial used for this project is $x^{64} + x^4 + x^3 + x + 1$ \cite{low-weight-polynomials}.
+The choice of irreducible polynomial does not affect correctness, and the fields obtained from different choices are isomorphic.
+
+\section{Efficient Finite Field Arithmetic}
+
+The efficiency of finite field arithmetic is crucial for the performance of the encoding and decoding algorithms.
+
+Addition is simple and fast, as it is equivalent to XOR.
+Multiplication, however, is slower and more complicated than integer multiplication, and division even more so.
+
+\subsection{Russian Peasant Algorithm}
 
 The Russian peasant algorithm multiplies two values in \GF{64} without requiring 128-bit integers.
 It incrementally performs the multiplication by adding intermediate values into an accumulator, and slowly shifting the values to be multiplied and applying polynomial reduction.
 
-The state of the algorithm consists of the two values to be multiplied $a$ and $b$, and an accumulator.
+This algorithm is fairly simple and easy to implement, however multiplication can be done far more efficiently on modern CPUs using carry-less multiplication.
+Still, this algorithm is necessary as a fallback for older CPUs.
 
-The algorithm must be executed at most 64 times, before $b$ is guaranteed to become zero. Then, the accumulator contains the result.
+The state of the algorithm consists of the two values to be multiplied $a$ and $b$, and an accumulator.
 
 At each iteration, if the low bit of $b$ is set, the accumulator is XORed with $a$.
 Then, $a$ is shifted left, and $b$ is shifted right.
 
 This is justified because, at each step, we multiply the lowest coefficient of $b$ with $a$, and add the result (either $0$ or $a$) to the accumulator.
-Then, moving on to the next coefficient of $b$, we divide $b$ by $x$ and multiply $a$ by $x$, which is equivalent to shifting $a$ left and $b$ right.
+Then, moving on to the next coefficient of $b$, we divide $b$ by $x$ and multiply $a$ by $x$.
 
-If the high bit of $a$ was set before shifting, $a$ is XORed with the irreducible polynomial.
-This is because, conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), which requires reduction, done by subtracting the irreducible polynomial using XOR.
+If the high bit of $a$ was set before shifting, $a$ is XORed with the irreducible polynomial, excluding the highest coefficient which would not fit in 64 bits.
+Conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), which is removed by subtracting the irreducible polynomial.
 
 \begin{algorithm}
 \caption{Russian Peasant Multiplication}
@@ -38,7 +111,7 @@ This is because, conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), 
     \State $a \gets a \ll 1$
     \State $b \gets b \gg 1$
     \If{$\text{carry}$}
-        \State $a \gets a \oplus \text{POLYNOMIAL}$
+        \State $a \gets a \oplus \text{POLYNOMIAL}$ 
     \EndIf
 \EndFor
 \State \Return $acc$
@@ -46,13 +119,9 @@ This is because, conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), 
 \end{algorithmic}
 \end{algorithm}
 
+\subsection{Carry-less Multiplication}
 
-This algorithm is fairly simple and easy to implement, but multiplication can be done more efficiently on modern CPUs with special instructions.
-Still, this algorithm is necessary as a fallback, for CPUs which don't support 128-bit carry-less multiplication.
-
-\section{Carry-less Multiplication}
-
-\GF{64} multiplication can be performed using three 128-bit carry-less multiplication operations.
+\GF{64} multiplication can be performed using only three 128-bit carry-less multiplication operations.
 Modern CPUs have support for this operation, as it is useful for cryptographic algorithms, computing checksums, and other applications. \cite{intel-clmul}
 
 The terms "upper half" and "lower half" will be used to refer to the most significant 64 bits and least significant 64 bits of a 128-bit integer, respectively.
@@ -70,18 +139,20 @@ This is effectively what carry-less multiplication does.
 There is a complication, however.
 A third multiplication is required to ensure full reduction, as the highest bits of the upper half can affect the lowest bits of the upper half.
 
+For fields where $x^{n - 1} + 1$ is irreducible, two multiplications would suffice, but this is not the case for \GF{64}.
+
 For example, consider $x^{127} + x^{67} + x^{66} + x^{64}$.
 After aligning the irreducible polynomial with the highest bit and XORing, all bits in the upper half are zero.
-At this point, the reduction is complete, but the multiplication does not know to stop here.
+At this point, the reduction is complete and should stop.
+However, this is not how carry-less multiplication works.
 The irreducible polynomial will also be aligned with the other three bits, and the lower half is XORed with some unnecessary values.
 
-The upper half of the reduced result indicates if and where this happened. A third multiplication is used to correct this.
+The upper half of the reduced result if and where this happened. A third multiplication will correct this.
 The unnecessary XORs are undone by XORing with the lower half of the third multiplication.
 
-For fields where $x^{n} + 1$ is irreducible, the algorithm simplifies to carry-less multiplication followed by XORing the upper and lower halves of the result.
-This is the case for $x^{63} + 1$, but is unfortunately not the case for $x^{64} + 1$ \cite{low-weight-polynomials}.
-
 The justification for the algorithm may seem somewhat complex, but the algorithm itself is very short, simple, and efficient.
+
+The functions $\text{upper}(x)$ and $\text{lower}(x)$ return the upper and lower 64 bits of the 128-bit integer $x$, respectively.
 
 \begin{algorithm}
 \caption{Carry-less Multiplication}
@@ -95,7 +166,11 @@ The justification for the algorithm may seem somewhat complex, but the algorithm
 \end{algorithmic}
 \end{algorithm}
 
-\section{Extended Euclidean Algorithm}
+\subsection{Extended Euclidean Algorithm}
+
+A simple way to compute the multiplicative inverse is to raise the element to the power of $2^{64} - 2$ using exponentiation by squaring.
+This was used in the early stages of this project, however it is not the most efficient method.
+It is still useful for unit testing, by checking that the more complicated algorithm agrees with the simpler exponentiation method.
 
 The polynomial extended Euclidean algorithm, given polynomials $a$ and $b$, computes $s$ and $t$ such that $a \cdot s + b \cdot t = \text{gcd}(a, b)$.
 When $b$ is set to the irreducible polynomial, $t$ is the multiplicative inverse of $a$. $s$ does not need to be computed.
