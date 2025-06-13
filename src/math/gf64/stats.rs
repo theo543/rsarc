@@ -26,11 +26,15 @@ pub struct ThreadLocalCount {
 
 pub trait LocalKeyExt {
     fn increment(&'static self);
+    fn load(&'static self) -> usize;
 }
 
 impl LocalKeyExt for std::thread::LocalKey<ThreadLocalCount> {
     fn increment(&'static self) {
         self.with(|local| local.count.set(local.count.get() + 1));
+    }
+    fn load(&'static self) -> usize {
+        self.with(|local| local.count.get())
     }
 }
 

@@ -3,6 +3,48 @@
 \renewcommand{\thesection}{A.\arabic{section}}
 \addappheadtotoc
 
+\section{Extended Euclidean Algorithm}
+\label{appendix:euclidean}
+
+In the following pseudocode, $\text{leading\_zeros}(x)$ returns the number of leading zero bits in $x$.
+Modern CPUs have a dedicated instruction for counting leading zeros.
+
+Because the irreducible polynomial is of degree 64, the first Euclidean division iteration, in the first iteration of the Euclidean algorithm, is a special case.
+As a 65-bit polynomial cannot fit in the 64-bit variable $b$, the first iteration is done manually, outside the loop.
+
+\begin{algorithm}
+\caption{Extended Euclidean Algorithm}
+\begin{algorithmic}
+\Function{ExtendedEuclidean}{$a$}
+
+\State $\textbf{assert}\ a \neq 0$
+
+\State \algorithmicif\ $a = 1$ \algorithmicthen\ \Return $1$ \algorithmicend \algorithmicif
+
+\State $t \gets 0$
+\State $\text{new\_t} \gets 1$
+\State $r \gets \text{POLYNOMIAL}$ \Comment the irreducible polynomial, 65-th bit excluded
+    \State $\text{new\_r} \gets a$
+
+\State $r \gets r \oplus (\text{new\_r} \ll (\text{leading\_zeros}(\text{new\_r}) + 1))$
+\State $\text{quotient} \gets 1 \ll (\text{leading\_zeros}(\text{new\_r}) + 1)$
+
+\While{$\text{new\_r} \neq 0$}
+    \While{$\text{leading\_zeros}(\text{new\_r}) >= \text{leading\_zeros}(r)$}
+        \State $\text{degree\_diff} \gets \text{leading\_zeros}(\text{new\_r}) - \text{leading\_zeros}(r)$
+        \State $\text{r} \gets r \oplus (\text{new\_r} \ll \text{degree\_diff})$
+        \State $\text{quotient} \gets \text{quotient} | (1 \ll \text{degree\_diff})$
+    \EndWhile
+    \State $(r, \text{new\_r}) \gets (\text{new\_r}, r)$
+    \State $(t, \text{new\_t}) \gets (\text{new\_t}, t \oplus \text{gf64\_multiply}(\text{quotient}, \text{new\_t}))$
+    \State $\text{quotient} \gets 0$
+\EndWhile
+\State $\textbf{assert}\ r = 1$
+\State \Return $t$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
 \section{Polynomial Transforms}
 \label{appendix:transforms}
 
@@ -12,11 +54,11 @@ The inverse and forward transforms are almost identical, except the outer loop d
     \caption{Transform Algorithms}
     \begin{algorithmic}
         \Function{InverseTransform}{\text{data}, \text{factors}}
-            \For{$\text{step} \gets 0 \text{ to } \log_2(\text{len(data)}) - 1$}
+            \For{$\text{step} \gets 0\ \textbf{to}\ \log_2(\text{len(data)}) - 1$}
                 \State $\text{group\_len} \gets 2^{\text{step}}$
                 \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
-                \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
-                    \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
+                \For{$\text{group} \gets 0\ \textbf{to}\ \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
+                    \For{$\text{x} \gets 0\ \textbf{to}\ \text{group\_len} - 1$}
                         \State $a \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
                         \State $b \gets a + \text{group\_len}$
                         \State $\text{data}[b] \gets \text{data}[b] + \text{data}[a]$
@@ -29,11 +71,11 @@ The inverse and forward transforms are almost identical, except the outer loop d
 
     \begin{algorithmic}
         \Function{ForwardTransform}{\text{data}, \text{factors}}
-            \For{$\text{step} \gets \log_2(\text{len(data)}) - 1 \text{ down to } 0$}
+            \For{$\text{step} \gets \log_2(\text{len(data)}) - 1\ \textbf{down to}\ 0$}
                 \State $\text{group\_len} \gets 2^\text{step}$
                 \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
-                \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
-                    \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
+                \For{$\text{group} \gets 0\ \textbf{to}\ \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
+                    \For{$\text{x} \gets 0\ \textbf{to}\ \text{group\_len} - 1$}
                         \State $a \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
                         \State $b \gets a + \text{group\_len}$
                         \State $\text{data}[a] \gets \text{data}[a] + \text{data}[b] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
@@ -48,7 +90,7 @@ The inverse and forward transforms are almost identical, except the outer loop d
         \Function{PrecomputeFactors}{\text{pow}, \text{offset}}
             \State $\text{factors} \gets \text{new array of \GF{64} values of size } 2^{\text{pow}} - 1$
             \State $\text{factor\_idx} \gets 0$
-            \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
+            \For{$\text{step} \gets 0\ \textbf{to}\ \text{pow} - 1$}
                 \State $\text{groups} \gets 2^{\text{pow} - \text{step} - 1}$
                 \For{$\text{group} \gets 0 \text{ to } \text{groups} - 1$}
                     \State $\text{factors}[\text{factor\_idx}] \gets \hat{W}_{\text{step}}(\omega_{\text{group} \cdot 2^{\text{step} + 1}} + \omega_{\text{offset}})$
@@ -76,8 +118,8 @@ The formal derivative also has time complexity $O(n \log n)$, but unlike the tra
         \Function{PrecomputeDerivativeFactors}{\text{pow}}
             \State $\text{assert}\ 0 \leq \text{pow} \le 64$
             \State $\text{factors} \gets \text{new array of \GF{64} values of size } \text{pow}$
-            \For{$l \gets 1 \text{ to } \text{pow} - 1$}
-                \For{$j \gets 2^{l - 1} \text{ to } 2^l - 1$}
+            \For{$l \gets 1\ \textbf{to}\ \text{pow} - 1$}
+                \For{$j \gets 2^{l - 1}\ \textbf{to}\ 2^l - 1$}
                     \State $\text{factors}[l] \gets \text{factors}[l] * \omega_j$
                 \EndFor
                 \If{$l + 1 \neq \text{pow}$}
@@ -90,8 +132,8 @@ The formal derivative also has time complexity $O(n \log n)$, but unlike the tra
     \end{algorithmic}
     \begin{algorithmic}
         \Function{FormalDerivative}{\text{data}, \text{factors}}
-            \For{$i \gets 0 \text{ to } \text{len(data) - 1}$}
-                \For{$\text{bit} \gets 0 \text{ to } \log_2(\text{len(data)})$}
+            \For{$i \gets 0\ \textbf{to}\ \text{len(data) - 1}$}
+                \For{$\text{bit} \gets 0\ \textbf{to}\ \log_2(\text{len(data)})$}
                     \If{$i \bitand 2^{\text{bit}} \neq 0$}
                         \State $\text{data}[i - 2^{\text{bit}}] \gets \text{data}[i - 2^{\text{bit}}] + \text{data}[i] \cdot \text{factors}[\text{bit}]$
                     \EndIf
@@ -125,24 +167,24 @@ The complexity is $O(n \log^2 n)$, since each step combines the results of two s
         \Function{InternalRecursion}{\text{erasures}, \text{out\_len}, \text{t\_fac}, \text{out\_values}}
             \If{$\text{len(erasures)} = 1$}
                 \If{$\text{out\_values} \neq \text{null}$}
-                    \State $\text{out\_values} \gets\ \text{new array}\ [\omega_i + \omega_{\text{erasures}[0]}\ \text{for}\ i\ \text{from}\ 0\ \text{to}\ \text{out\_len} - 1]$
+                    \State $\text{out\_values} \gets\ \text{new array}\ [\omega_i + \omega_{\text{erasures}[0]}\ \textbf{for}\ i\ \textbf{from}\ 0\ \textbf{to}\ \text{out\_len} - 1]$
                 \EndIf
                 \State $\Return\ \text{new array}\ [\omega_{\text{erasures}[0]}, 1, 0, \ldots, 0]\ \text{of size}\ \text{out\_len}$
             \EndIf
             \State $\text{special\_case} \gets \text{len(erasures) + 1} = \text{out\_len}$
 
-            \State $a \gets \text{InternalRecursion}(\text{erasures}\ \text{from 0 to}\ \frac{\text{len(erasures)}}{2} - 1 , \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
+            \State $a \gets \text{InternalRecursion}(\text{erasures}\ \textbf{from}\ 0\ \textbf{to}\ \frac{\text{len(erasures)}}{2} - 1 , \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
             \State $\text{ResizeWithZeros}(a, \text{out\_len})$
             \State $\text{ForwardTransform}(a, \text{t\_fac})$
 
-            \State $b \gets \text{InternalRecursion}(\text{erasures}\ \text{from}\ \frac{\text{len(erasures)}}{2} + \text{special\_case}\ \text{to end}, \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
+            \State $b \gets \text{InternalRecursion}(\text{erasures}\ \textbf{from}\ \frac{\text{len(erasures)}}{2} + \text{special\_case}\ \textbf{to end}, \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
             \State $\text{ResizeWithZeros}(b, \text{out\_len})$
             \State $\text{ForwardTransform}(b, \text{t\_fac})$
 
             \State $a \gets a * b$ \Comment{polynomial evaluations are multiplied in $O(n)$ time}
 
             \If{$\text{special\_case}$}
-                \State $a \gets a * [\omega_i + \omega_{\text{erasures}[\frac{\text{len(erasures)}}{2}]} \text{ for } i \text{ from } 0 \text{ to } \frac{\text{out\_len}}{2} - 1]$
+                \State $a \gets a * [\omega_i + \omega_{\text{erasures}[\frac{\text{len(erasures)}}{2}]}\ \textbf{for}\ i\ \textbf{from}\ 0\ \textbf{to}\ \frac{\text{out\_len}}{2} - 1]$
                 \Comment{multiply in extra value}
             \EndIf
 

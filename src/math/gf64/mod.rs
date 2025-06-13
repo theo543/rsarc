@@ -6,6 +6,16 @@ mod stats;
 pub use stats::print_stats;
 use stats::thread_locals::*;
 
+#[cfg(feature = "gf64_stats")]
+pub fn average_extended_euclidean_iterations() -> f64 {
+    assert_eq!(MULTIPLICATIONS_PERFORMED.load(), 0);
+    const N: usize = 1_000_000;
+    for _ in 0..N {
+        let _ = GF64(fastrand::u64(0..)).invert();
+    }
+    EUCLIDEAN_ITERATIONS.load() as f64 / N as f64
+}
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[repr(transparent)] // <- to allow safe conversion
 pub struct GF64(pub u64);
@@ -143,6 +153,8 @@ impl GF64 {
             (t, new_t) = (new_t, t ^ mul_u64_in_gf64(quotient, new_t));
             quotient = 0;
         }
+
+        assert_eq!(r, 1);
 
         GF64(t)
     }

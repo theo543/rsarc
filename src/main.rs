@@ -21,6 +21,12 @@ fn main() {
     match args.get(1).map(|x| x.as_str()).unwrap_or("test") {
         "test" => end_to_end_test::test().unwrap(),
 
+        #[cfg(feature = "gf64_stats")]
+        "extended_euclidean_average_mul" => {
+            println!("Average multiplications used in extended Euclidean algorithm: {}", math::gf64::average_extended_euclidean_iterations());
+            return;
+        }
+
         "encode" => {
             if args.len() != 6 {
                 println!("Usage: encode <input file> <output file> <block bytes> <parity blocks>");
