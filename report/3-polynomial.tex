@@ -10,28 +10,30 @@ The polynomial basis $\mathbb{X} = \{X_0, \ldots, X_{2^{64} - 1}\}$ admits trans
 To encode a $RS(n, k)$ code, the data polynomial coefficients are obtained by applying $(\Psi_h^0)^{-1}$ to the input values, then additional values are obtained using $\Psi_h^l$ $\frac{n}{k}$ times at offsets $l = k, 2k, \ldots, n - k$.
 
 The basis polynomials $X_i$ are defined as the products of polynomials $\hat{W}_j$ corresponding to the bits of the index $i$:
-\[X_i = \prod_{j \in \text{bits}(i)} \hat{W}_j\]
+\begin{equation}X_i = \prod_{j \in \text{bits}(i)} \hat{W}_j\end{equation}
 
 $\hat{W}_i = \frac{W_i}{W_i(2^{i})}$ is a normalized vanishing polynomial of degree $2^{i}$, which vanishes (i.e. evaluates to zero) at the points $\omega_0, \omega_1, \ldots, \omega_{2^{i} - 1}$, and evaluates to $1$ at $\omega_{2^{i}}$.
-\[\hat{W}_i(x) = \frac{W_i(x)}{W_i(2^{i})} = \frac{\prod_{j = 0}^{2^i - 1} (x - \omega_j)}{\prod_{j = 0}^{2^i - 1} (\omega_{2^i} - \omega_j)}\]
+\begin{equation}\hat{W}_i(x) = \frac{W_i(x)}{W_i(2^{i})} = \frac{\prod_{j = 0}^{2^i - 1} (x - \omega_j)}{\prod_{j = 0}^{2^i - 1} (\omega_{2^i} - \omega_j)}\end{equation}
 
 $\hat{W}_i$ has degree $2^{i}$, as it is the product of $2^{i}$ degree one factors divided by a constant. Therefore, $X_i$ has degree $i$, since it the product of $W_j$ corresponding to the bits set in $i$.
 Since $\mathbb{X}$ contains $2^{64}$ polynomials with all degrees from $0$ to $2^{64} - 1$, it automatically is a valid basis for representing polynomials of degree up to $2^{64} - 1$.
 
 All $W_i$ are linearized polynomials, which means they only have non-zero coefficients at power-of-two indices and are additive:
-\[W_i(x + y) = W_i(x) + W_i(y)\]
+\begin{equation}W_i(x + y) = W_i(x) + W_i(y)\end{equation}
 
-Note that the standard monomial basis $\{1, x, x^2, \ldots, x^{2^{64} - 1}\}$ could also be defined in a similar way, with $\hat{W}_i = X^{2^{i}}$, but that would not allow $O(n \log n)$ FFT-like transforms.
+Note that the standard monomial basis $\{1, x, x^2, \ldots, x^{2^{64} - 1}\}$ could also be defined in a similar way, with $\hat{W}_i = X^{2^{i}}$, but that would not be sufficient to allow FFT-like fast transforms.
+
+The definition of $\hat{W}_i$ as normalized vanishing polynomials is critical for simplifying equation \ref{eq:1} into \ref{eq:1-simplified}, without which the transforms would not be $O(n \log n)$.
 
 \section{Forward and Inverse Transforms}
 
 Let $D_h$ be the data polynomial with $h$ coefficients $d_0, d_1, \ldots, d_{h - 1}$. It can be expressed as a recursive function $\Delta_i^m(x)$, with $D_h(x) = \Delta_0^0(x)$:
-\[
+\begin{equation}
 \Delta_i^m(x) = \begin{cases}
     \Delta_{i+1}^m(x) + \hat{W}_i(x) \Delta_{i+1}^{m+2^i}(x) & 0 \leq i \le \log_2(h) \\
     d_m & i = \log_2(h) \\
     \end{cases}
-\]
+\end{equation}
 
 At each step, the polynomial is split into coefficients whose index has the $i$-th bit set and those which don't. The final steps select the coefficient corresponding to the selected index $m$.
 
@@ -45,21 +47,28 @@ $\Phi(i, m, l)$ can be computed in $O(n)$ time from $\Phi(i + 1, m, l)$ and $\Ph
 For each pair of values at index $x$ in the two smaller vectors, the values at indices $2x$ and $2x + 2^i$ in the larger vector can be computed. The values will be denoted as $a, b, a', b'$ for clarity.
 
 $a'$ is straightforwardly computed as:
-\[a' = \Delta_i^m(\omega_c + \omega_l) = \Delta_{i+1}^m(\omega_c + \omega_l) + \hat{W}_i(\omega_c + \omega_l) \Delta_{i+1}^{m + 2^i}(\omega_c + \omega_l) = a + \hat{W}_i(\omega_c + \omega_l) b\]
+\begin{equation}a' = \Delta_i^m(\omega_c + \omega_l) = \Delta_{i+1}^m(\omega_c + \omega_l) + \hat{W}_i(\omega_c + \omega_l) \Delta_{i+1}^{m + 2^i}(\omega_c + \omega_l) = a + \hat{W}_i(\omega_c + \omega_l) b\end{equation}
 
 The calculation of $b'$ relies on the properties of the vanishing polynomials:
-\[b' = \Delta_i^{m}(\omega_c + \omega_l + \omega_{2^i}) = \Delta_{i+1}^m(\omega_c + \omega_l + \omega_{2^i}) + \hat{W}_i(\omega_c + \omega_l + \omega_{2^i}) \Delta_{i+1}^{m + 2^i}(\omega_c + \omega_l + \omega_{2^i})\]
+\begin{equation}b' = \Delta_i^{m}(\omega_c + \omega_l + \omega_{2^i}) = \Delta_{i+1}^m(\omega_c + \omega_l + \omega_{2^i}) + \hat{W}_i(\omega_c + \omega_l + \omega_{2^i}) \Delta_{i+1}^{m + 2^i}(\omega_c + \omega_l + \omega_{2^i})\label{eq:1}\end{equation}
 
 The term $\omega_{2^i}$ vanishes in both $\Delta_{i+1}^m$ and $\Delta_{i+1}^{m + 2^i}$, since both contain only vanishing polynomials $W_j$ with $j \geq i + 1$.
 
 As $\hat{W}_i$ is normalized, $\hat{W}_i(\omega_c + \omega_l + \omega_{2^i}) = \hat{W}_i(\omega_c + \omega_l) + \hat{W}_i(\omega_{2^i}) = \hat{W}_i(\omega_c + \omega_l) + 1$.
 
-Therefore, $b'$ is computed as:
-\[b' = a + (\hat{W}_i(\omega_c + \omega_l) + 1) b = a + \hat{W}_i(\omega_c + \omega_l) b + b = a' + b\]
+\begin{equation}b' = a + (\hat{W}_i(\omega_c + \omega_l) + 1) b = a + \hat{W}_i(\omega_c + \omega_l) b + b = a' + b'\label{eq:1-simplified}\end{equation}
 
-The reverse calculation is also straightforward, and does not require division:
-\[b' + a' = (a' + b) + a' = b\]
-\[a' + \hat{W}_i(\omega_c + \omega_l) b = (a + \hat{W}_i(\omega_c + \omega_l) b) + \hat{W}_i(\omega_c + \omega_l) b = a\]
+Remember that $a$ and $b$ are the evaluations of $\Delta_{i+1}^m$ and $\Delta_{i+1}^{m + 2^i}$ at $\omega_c + \omega_l$, whereas $a'$ and $b'$ evaluations of $\Delta_i^m$ at $\omega_c + \omega_l$ and $\omega_c + \omega_l + \omega_{2^i}$, respectively.
+While the computation of $a'$ is simple and follows from the definition of $\Delta_i^m$, $b'$ is located a different index, and it is only possible to write it in terms of $a$ and $b$ because of the choice of basis polynomials $\hat{W}_i$.
+
+If the standard monomial basis was used, the calculation of $b'$ would require completely different evaluations of $\Delta_{i+1}^m$ and $\Delta_{i+1}^{m + 2^i}$ at the index $\omega_c + \omega_l + \omega_{2^i}$.
+There would be no halving of subproblem size at each step of the recursion, so the transform would have complexity $O(n^2)$ instead of $O(n \log n)$.
+
+Computing $a$ and $b$ from $a'$ and $b'$ is similar, and does not require finite field division:
+\begin{equation}b' + a' = (a' + b) + a' = b\end{equation}
+\begin{equation}a' + \hat{W}_i(\omega_c + \omega_l) b = (a + \hat{W}_i(\omega_c + \omega_l) b) + \hat{W}_i(\omega_c + \omega_l) b = a\end{equation}
+
+Since the individual steps of the forward transform are reversible, the entire transform can be run backwards to obtain the inverse transform.
 
 The vectors can be stored interleaved in a single array, initialized to $[d_0, d_1, \ldots, d_{h - 1}]$ ($h$ single-element vectors), and then updated in-place in $log_2(h)$ steps, each step requiring $O(n)$ time.
 
@@ -67,63 +76,7 @@ See the butterfly diagram in \cite{novel-poly} for a visual representation of th
 
 In total, $n - 1$ unique factors are needed - one evaluation of $\hat{W}_{\log_2(n)}$, two of $\hat{W}_{\log_2(n) - 1}$, \ldots, $\frac{n}{2}$ evaluations of $\hat{W}_0$ - which can be computed in $O(n \log n)$ time.
 
-The inverse and forward transforms are almost identical, except the outer loop direction and the inner operations are reversed.
-
-\enlargethispage{\baselineskip} % squeeze the next line into the same page as the previous, since the transforms will completely fill the next page
-
-Notice the transforms can use factors of a greater power than needed. To compute multiple transforms of different sizes with the same offset, only the factors for the largest size must be computed, and can be used for all smaller sizes.
-
-\begin{algorithm}
-    \caption{Transform Algorithms}
-    \begin{algorithmic}
-        \Function{PrecomputeFactors}{\text{pow}, \text{offset}}
-            \State $\text{factors} \gets \text{new array of \GF{64} values of size } 2^{\text{pow}} - 1$
-            \State $\text{factor\_idx} \gets 0$
-            \For{$\text{step} \gets 0 \text{ to } \text{pow} - 1$}
-                \State $\text{groups} \gets 2^{\text{pow} - \text{step} - 1}$
-                \For{$\text{group} \gets 0 \text{ to } \text{groups} - 1$}
-                    \State $\text{factors}[\text{factor\_idx}] \gets \hat{W}_{\text{step}}(\omega_{\text{group} \cdot 2^{\text{step} + 1}} + \omega_{\text{offset}})$
-                    \State $\text{factor\_idx} \gets \text{factor\_idx} + 1$
-                \EndFor
-            \EndFor
-            \State \Return $\text{factors}$
-        \EndFunction
-    \end{algorithmic}
-
-    \begin{algorithmic}
-        \Function{InverseTransform}{\text{data}, \text{factors}}
-            \For{$\text{step} \gets 0 \text{ to } \log_2(\text{len(data)}) - 1$}
-                \State $\text{group\_len} \gets 2^{\text{step}}$
-                \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
-                \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
-                    \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
-                        \State $a \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
-                        \State $b \gets a + \text{group\_len}$
-                        \State $\text{data}[b] \gets \text{data}[b] + \text{data}[a]$
-                        \State $\text{data}[a] \gets \text{data}[a] + \text{data}[b] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
-                    \EndFor
-                \EndFor
-            \EndFor
-        \EndFunction
-    \end{algorithmic}
-
-    \begin{algorithmic}
-        \Function{ForwardTransform}{\text{data}, \text{factors}}
-            \For{$\text{step} \gets \log_2(\text{len(data)}) - 1 \text{ down to } 0$}
-                \State $\text{group\_len} \gets 2^\text{step}$
-                \State $\text{group\_factors\_start} \gets \text{len(factors)} + 1 - \frac{\text{len(factors)} + 1}{2^{\text{step}}}$
-                \For{$\text{group} \gets 0 \text{ to } \frac{\text{len(data)}}{2^{\text{step} + 1}} - 1$}
-                    \For{$\text{x} \gets 0 \text{ to } \text{group\_len} - 1$}
-                        \State $a \gets \text{group} \cdot \text{group\_len} \cdot 2 + x$
-                        \State $b \gets a + \text{group\_len}$
-                        \State $\text{data}[a] \gets \text{data}[a] + \text{data}[b] \cdot \text{factors}[\text{group\_factors\_start} + \text{group}]$
-                        \State $\text{data}[b] \gets \text{data}[b] + \text{data}[a]$
-                    \EndFor
-                \EndFor
-            \EndFor
-        \EndFunction
-    \end{algorithmic}
-\end{algorithm}
+See \ref{appendix:transforms} for pseudocode.
 
 \section{Formal Derivative}
 
@@ -138,85 +91,54 @@ In all fields, the formal derivative of a polynomial is well-defined and the sta
 \end{gather*}
 
 The multiplication $i \cdot a_i$ between an integer and a field element is defined as repeated addition, which in \GF{n} is either zero or $a_i$, as $a_i + a_i = 0$.
-\[
+\begin{equation}
 i \cdot a_i =
     \begin{cases}
         a_i & i\ \text{odd} \\
         0 & i\ \text{even}
     \end{cases}
-\]
+\end{equation}
 
 Therefore, the formal derivative of a polynomial $f$ in \GF{n} written in the standard monomial basis is:
-\[f' = a_1 + a_3 x^2 + a_5 x^4 + \ldots\]
+\begin{equation}f' = a_1 + a_3 x^2 + a_5 x^4 + \ldots\end{equation}
 
 As the normalized vanishing polynomial $\hat{W}_i$ only has coefficients at power-of-two indices, the derivative will be a constant:
-\[\hat{W}_i' = \frac{\prod_{j = 1}^{2^i - 1} \omega_j}{W_i(2^i)}\]
+\begin{equation}\hat{W}_i' = \frac{\prod_{j = 1}^{2^i - 1} \omega_j}{W_i(2^i)}\end{equation}
 
 To find the derivative of the basis polynomial $X_i$, which is a product of up to 64 polynomials, the product rule generalized to a product of $n$ polynomials is used:
 
-\[
+\begin{equation}
 (\prod_{i = 0}^{n} f_i)' = \sum_{j = 0}^{n} f_j' \cdot \prod_{i \neq j} f_j
-\]
+\end{equation}
 
 Therefore, the derivative of $X_i$ contains $|\text{bits}(i)|$ terms, each of which is a basis polynomial with one bit of $i$ unset, multiplied by the derivative of the vanishing polynomial corresponding to that bit:
 
-\[
+\begin{equation}
 X_i' = \sum_{b \in \text{bits}(i)} \hat{W}_b' \cdot X_{i - 2^b}
-\]
+\end{equation}
 
-Notice that $X_i'$ only has terms with indices less than $i$, so the derivative of a polynomial in basis $\mathbb{X}$ can be computed in-place by iterating from the lowest degree to the highest degree coefficients, in $O(n \log n)$ time.
+$X_i'$ only has terms with indices less than $i$, so the derivative can be computed in-place by iterating from the lowest degree to the highest degree coefficients (see \ref{appendix:derivative}).
 
-\begin{algorithm}
-    \caption{Polynomial Derivative}
-    \begin{algorithmic}
-        \Function{PrecomputeDerivativeFactors}{\text{pow}}
-            \State $\text{assert}\ 0 \leq \text{pow} \le 64$
-            \State $\text{factors} \gets \text{new array of \GF{64} values of size } \text{pow}$
-            \For{$l \gets 1 \text{ to } \text{pow} - 1$}
-                \For{$j \gets 2^{l - 1} \text{ to } 2^l - 1$}
-                    \State $\text{factors}[l] \gets \text{factors}[l] * \omega_j$
-                \EndFor
-                \If{$l + 1 \neq \text{pow}$}
-                    \State $\text{factors}[l + 1] \gets \text{factors}[l]$
-                \EndIf
-                \State $\text{factors}[l] \gets \text{factors}[l] / W_l(2^l)$
-            \EndFor
-            \State \Return $\text{factors}$
-        \EndFunction
-    \end{algorithmic}
-    \begin{algorithmic}
-        \Function{FormalDerivative}{\text{data}, \text{factors}}
-            \For{$i \gets 0 \text{ to } \text{len(data) - 1}$}
-                \For{$\text{bit} \gets 0 \text{ to } \log_2(\text{len(data)})$}
-                    %\State $\text{data}[i - 2^{\text{bit}}] \gets \text{data}[i] \cdot \text{factors}[\text{bit}]$
-                    \If{$i \bitand 2^{\text{bit}} \neq 0$}
-                        \State $\text{data}[i - 2^{\text{bit}}] \gets \text{data}[i - 2^{\text{bit}}] + \text{data}[i] \cdot \text{factors}[\text{bit}]$
-                    \EndIf
-                \EndFor
-                \State $\text{data}[i] \gets 0$
-            \EndFor
-        \EndFunction
-    \end{algorithmic}
-\end{algorithm}
+The time complexity of the formal derivative is $O(n \log n)$, since at each step there are up to $\log_2(n)$ bits in the index, and computing the factors $\hat{W}_i'$ for $i = 0, 1, \ldots, \log_2(n) - 1$ also takes $O(n \log n)$ time.
 
 \section{Polynomial Recovery}
 
 In order to recover the original polynomial using the formal derivative, an error locator polynomial is constructed which vanishes at the points where errors occurred.
 
-Let $\text{ERASURES}$ be the set of indices where an error occurred. As previously mentioned, erasure codes require knowledge of the location of all errors, which, for this application, will be obtained using hashing.
-\[e = \prod_{i \in \text{ERASURES}} (x + \omega_i)\]
+Let $\text{ERASURES}$ be the set of indices where an error occurred. As previously mentioned, erasure codes require knowledge of all error locations, which will be obtained using hashes.
+\begin{equation}e = \prod_{i \in \text{ERASURES}} (x + \omega_i)\end{equation}
 
-Since $e$ does not depend on the actual values of the data polynomial, its values can be computed and multiplied with the received incomplete data polynomial $d$, to zero out all unknown values.
+Since $e$ does not depend on the actual values of the data polynomial, its values can be computed and multiplied with the incomplete data polynomial $d$, to zero out all unknown values.
 
 The product rule allows the original polynomial $d$ to be recovered:
-\begin{gather*}
+\begin{gather}
 (e \cdot d)' = e' \cdot d + e \cdot d'\\
 (e \cdot d)'(\omega_x) = e'(\omega_x) \cdot d(\omega_x) + 0 \cdot d'(\omega_x)\ \forall\ x \in \text{ERASURES}\\
 d(\omega_x) = \frac{(e \cdot d)'(\omega_x)}{e'(\omega_x)}\ \forall\ x \in \text{ERASURES}
-\end{gather*}
+\end{gather}
 
-Therefore, the original polynomial is recovered by multiplying the received polynomial by the error locator polynomial, applying the inverse transform, taking the formal derivative, applying the forward transform,
-and finally dividing by the derivative of the error locator polynomial, at the error locations.
+Therefore, the original polynomial is recovered by multiplying $d$ by $e$, applying the inverse transform, taking the formal derivative, applying the forward transform,
+and finally dividing by $e'$ at the error locations.
 
 \begin{algorithm}
     \caption{Reed-Solomon Decoding}
@@ -234,57 +156,9 @@ and finally dividing by the derivative of the error locator polynomial, at the e
     \end{algorithmic}
 \end{algorithm}
 
-For this application, $(e, e')$ can be reused for the entire file, since all Reed-Solomon codes will have the same error locations - a missing block causes a missing value in all codes (remember the codes are 'columns' which span the entire file),
-and $e'$ can be inverted in advance to reduce the number of multiplicative inverse operations.
+For this application, $(e, e')$ can be reused for the entire file, with $e'$ inverted in advance, since a corrupt block causes an erasure at the same index in all the interleaved codes.
 
-\section{Error Locator Computation}
+A $O(n \log n)$ algorithm for computing the error locator is described in \cite{novel-poly} which uses fast Walsh-Hadamard transforms, however it requires $2^r$ operations where $r$ is the power of the field, so it is not useful for \GF{64}.
 
-A $O(n \log n)$ algorithm for computing the error locator polynomial is described in \cite{novel-poly} which uses fast Walsh-Hadamard transforms, however it requires $2^r$ operations where $r$ is the power of the field, so it is not useful for \GF{64}.
-
-Instead, I used a $O(n \log^2 n)$ recursive algorithm which splits the polynomial into two halves, and combines the two results by multiplying in $O(n \log n)$ time using the transforms.
-
-\begin{algorithm}
-    \caption{Error Locator Polynomial Computation}
-    \begin{algorithmic}
-        \Function{ComputeErrorLocator}{\text{erasures}, \text{out\_len}, \text{t\_fac}, \text{d\_fac}}
-            \State $\text{values} \gets \text{new empty array}$
-            \State $\text{coefficients} \gets \text{InternalRecursion}(\text{erasures}, \text{out\_len}, \text{t\_fac}, \text{d\_fac}, \text{values})$
-            \State $\text{FormalDerivative}(\text{coefficients}, \text{d\_fac})$
-            \State $\text{ForwardTransform}(\text{coefficients}, \text{t\_fac})$
-            \State \Return $(\text{values},\ \text{coefficients})$ \Comment{coefficients now contains values of derivative}
-        \EndFunction
-        \Function{InternalRecursion}{\text{erasures}, \text{out\_len}, \text{t\_fac}, \text{out\_values}}
-            \If{$\text{len(erasures)} = 1$}
-                \If{$\text{out\_values} \neq \text{null}$}
-                    \State $\text{out\_values} \gets\ \text{new array}\ [\omega_i + \omega_{\text{erasures}[0]}\ \text{for}\ i\ \text{from}\ 0\ \text{to}\ \text{out\_len} - 1]$
-                \EndIf
-                \State $\Return\ \text{new array}\ [\omega_{\text{erasures}[0]}, 1, 0, \ldots, 0]\ \text{of size}\ \text{out\_len}$
-            \EndIf
-            \State $\text{special\_case} \gets \text{len(erasures) + 1} = \text{out\_len}$
-
-            \State $a \gets \text{InternalRecursion}(\text{erasures}\ \text{from 0 to}\ \frac{\text{len(erasures)}}{2} - 1 , \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
-            \State $\text{ResizeWithZeros}(a, \text{out\_len})$
-            \State $\text{ForwardTransform}(a, \text{t\_fac})$
-
-            \State $b \gets \text{InternalRecursion}(\text{erasures}\ \text{from}\ \frac{\text{len(erasures)}}{2} + \text{special\_case}\ \text{to end}, \frac{\text{out\_len}}{2}, \text{t\_fac}, \text{null})$
-            \State $\text{ResizeWithZeros}(b, \text{out\_len})$
-            \State $\text{ForwardTransform}(b, \text{t\_fac})$
-
-            \State $a \gets a * b$ \Comment{polynomial evaluations are multiplied in $O(n)$ time}
-
-            \If{$\text{special\_case}$}
-                \State $a \gets a * [\omega_i + \omega_{\text{erasures}[\frac{\text{len(erasures)}}{2}]} \text{ for } i \text{ from } 0 \text{ to } \frac{\text{out\_len}}{2} - 1]$
-                \Comment{multiply in extra value}
-            \EndIf
-
-            \If{$\text{out\_values} \neq \text{null}$} \Comment{the top-most call must return both coefficients and values}
-                \State $\text{out\_values} \gets \text{Copy}(a)$ \Comment{the memory of $b$ can be reused here for the copy}
-            \EndIf
-
-            \State $\text{InverseTransform}(a, \text{t\_fac})$ \Comment{convert back to coefficients after multiplications are done}
-            \State \Return $a$
-        \EndFunction
-    \end{algorithmic}
-\end{algorithm}
-
-The special case is sometimes needed to prevent a branch where $\text{len(erasures)} = \text{out\_len}$, which would request only $n$ coefficients for a polynomial of degree $n$.
+Instead, I used a $O(n \log^2 n)$ recursive algorithm (\ref{appendix:locator}) which splits the polynomial into two halves, recursively computes each half, and combines the two results by multiplying in $O(n \log n)$ time using the transforms.
+\enlargethispage{\baselineskip}

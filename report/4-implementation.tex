@@ -81,3 +81,5 @@ The input buffers are protected by a read-write lock, which allows multiple proc
 This is only used to ensure thread-safety, not for synchronization, which is done only using channels and the atomic counters.
 
 The processor threads share the same precomputed factors, which depending on the task are either transform factors at multiple offsets for encoding, or transform factors plus derivative factors and the error locator polynomial for decoding.
+
+%TODO: add benchmarks for all algorithms and for full encoding/decoding

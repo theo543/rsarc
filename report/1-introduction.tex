@@ -44,3 +44,5 @@ Instead, I implemented a Reed-Solomon code which supports up to $2^{64}$ blocks,
 by using a polynomial basis introduced in \cite{novel-poly} over polynomials in the finite field \GF{64}.
 
 The implementation also uses efficient algorithms for the finite field arithmetic which is at the root of Reed-Solomon codes, using a modern CPU feature - carry-less multiplication \cite{intel-clmul} - for fast finite field multiplication.
+
+This thesis will outline the mathematics of finite field arithmetic and Reed-Solomon codes, the polynomial basis and transforms used for $O(n \log n)$ encoding and decoding, the high-level architecture of the implementation, and its performance characteristics.
