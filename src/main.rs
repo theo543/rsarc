@@ -8,6 +8,9 @@ mod verifier;
 mod reassembler;
 mod end_to_end_test;
 
+#[cfg(feature = "poly_benchmarks")]
+mod poly_benchmarks;
+
 use std::fs::OpenOptions;
 
 use encoder::{encode, repair, EncodeOptions};
@@ -24,6 +27,12 @@ fn main() {
         #[cfg(feature = "gf64_stats")]
         "extended_euclidean_average_mul" => {
             println!("Average multiplications used in extended Euclidean algorithm: {}", math::gf64::average_extended_euclidean_iterations());
+            return;
+        }
+
+        #[cfg(feature = "poly_benchmarks")]
+        "poly_benchmarks" => {
+            poly_benchmarks::poly_benchmarks();
             return;
         }
 

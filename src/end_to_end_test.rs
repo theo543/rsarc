@@ -62,7 +62,7 @@ pub fn test() -> io::Result<()> {
 
     let start_time = std::time::Instant::now();
     encode(&mut input, &mut output, EncodeOptions{block_bytes, parity_blocks})?;
-    println!("Time: {:?}", start_time.elapsed());
+    println!("Encode time: {:?}", start_time.elapsed());
 
     let output_file_hash = hash_file(OUTPUT_FILE_NAME)?;
 
@@ -88,7 +88,10 @@ pub fn test() -> io::Result<()> {
     let corruption = verify(&mut input, &mut output)?;
     corruption.report_corruption(false);
     let VerifyResult::Ok{data_errors: data_file, parity_errors: parity_file, header} = corruption else { panic!("metadata should not be corrupted") };
+
+    let start_time = std::time::Instant::now();
     repair(&mut input, &mut output, header, data_file, parity_file)?;
+    println!("Repair time: {:?}", start_time.elapsed());
 
     verify(&mut input, &mut output)?.report_corruption(true);
 

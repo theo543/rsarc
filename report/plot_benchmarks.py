@@ -1,22 +1,33 @@
+import matplotlib
 from matplotlib import pyplot as plt
 import pandas as pd
-from sys import argv
 
-df = pd.read_csv(argv[1], header=None, names=['name', 'size', 'time'])
+matplotlib.use("pgf")
+matplotlib.rcParams.update({
+    "pgf.texsystem": "pdflatex",
+    'font.family': 'serif',
+    'text.usetex': True,
+    'pgf.rcfonts': False,
+})
 
-agg = df.groupby(['name', 'size'])['time'].agg(['mean', 'min']).reset_index()
+df = pd.read_csv("benchmark_poly.csv", header=None, names=['name', 'size', 'time'])
 
-for name in ['oversample', 'recover']:
+agg = df.groupby(['name', 'size'])['time'].agg(['mean', 'std']).reset_index()
+
+plt.figure(figsize=(5, 3))
+
+for name in ['oversample', 'precompute_oversampling', 'recover', 'precompute_recovery', 'oversample_newton']:
     results = agg[agg['name'] == name]
     print(results)
-    name = name.title()
-    plt.plot(results['size'], results['mean'], label=f'{name} (mean)')
-    plt.plot(results['size'], results['min'], label=f'{name} (min)', linestyle='--')
+    name = name.replace('_', ' ').title()
+    plt.errorbar(results['size'], results['mean'], yerr=results['std'], label=name, marker='o', linestyle='-')
 
-plt.xscale('log', base=2)
 plt.yscale('log', base=2)
-plt.xlabel('bytes')
+plt.xscale('log', base=2)
+plt.grid()
+plt.xlabel('symbols')
 plt.ylabel('time (ns)')
-plt.legend()
-plt.tight_layout()
-plt.show()
+plt.gca().set_xticks([2**i for i in range(8, 18)])
+plt.gca().set_yticks([2**i for i in range(11, 35, 2)])
+plt.legend(loc='upper right', fontsize='small')
+plt.savefig('benchmarks_log_poly.pgf', bbox_inches='tight')

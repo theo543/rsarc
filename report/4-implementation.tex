@@ -82,4 +82,23 @@ This is only used to ensure thread-safety, not for synchronization, which is don
 
 The processor threads share the same precomputed factors, which depending on the task are either transform factors at multiple offsets for encoding, or transform factors plus derivative factors and the error locator polynomial for decoding.
 
-%TODO: add benchmarks for all algorithms and for full encoding/decoding
+\section{Benchmarks}
+
+Several kinds of benchmarks were implemented to measure the performance of various aspects of the implementation.
+
+\subsection{Polynomial Oversampling and Recovery}
+
+This benchmark measures the performance of the encoding and decoding algorithms, as well as of the precomputation of the necessary transform factors, derivative factors, and error locator polynomial.
+It also includes a $O(n^2)$ algorithm from an early version of the project, which uses Newton interpolation and Horner's method, for comparison.
+
+The results show the encoding, decoding, and precomputation algorithms scale approximately linearly with the number of symbols, as expected, with the old algorithm scaling quadratically, becoming unusable for large inputs.
+
+For both encoding and decoding, precomputation is slower than the main algorithm, especially for recovery.
+However, even for a small block size of one kilobyte (equal to 128 64-bit symbols), the main algorithm will be executed over a hundred times more, so the performance of the precomputation step is not an issue.
+
+\begin{figure}[!hbt]
+\begin{center}
+\input{benchmarks_log_poly.pgf}
+\end{center}
+\caption{Log-scale plot of polynomial oversampling and recovery benchmarks.}
+\end{figure}

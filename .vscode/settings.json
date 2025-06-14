@@ -1,0 +1,10 @@
+{
+    "rust-analyzer.cargo.features": [
+        "gf64_stats",
+        "poly_benchmarks",
+    ],
+    "cSpell.words": [
+        "ilog",
+        "nanos"
+    ]
+}

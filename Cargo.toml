@@ -8,6 +8,7 @@ default-run = "rsarc"
 gf64_stats = []
 no_clmul_check = []
 no_lzcnt_check = []
+poly_benchmarks = []
 
 [dependencies]
 fastrand = "2.3.0"
@@ -24,7 +25,3 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
-
-[[bin]]
-name = "rsarc-bench"
-path = "src/benchmarks.rs"
