@@ -2,9 +2,12 @@
 name = "rsarc"
 version = "0.1.0"
 edition = "2021"
+default-run = "rsarc"
 
 [features]
 gf64_stats = []
+no_clmul_check = []
+no_lzcnt_check = []
 
 [dependencies]
 fastrand = "2.3.0"
@@ -21,3 +24,7 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[[bin]]
+name = "rsarc-bench"
+path = "src/benchmarks.rs"

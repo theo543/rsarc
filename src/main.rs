@@ -14,7 +14,7 @@ use encoder::{encode, repair, EncodeOptions};
 use utils::ShareModeExt;
 
 fn main() {
-    math::gf64::check_cpu_support_for_carryless_multiply();
+    math::gf64::detect_cpu_features();
     utils::progress::register_panic_hook();
 
     let args: Vec<String> = std::env::args().collect();

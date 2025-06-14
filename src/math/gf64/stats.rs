@@ -130,9 +130,8 @@ fn print_sep(name: &str, value: usize) {
 
 def_counts! {
     "Inverses computed": INVERSES_COMPUTED;
-    "Multiplications performed as part of inversion": MULTIPLICATIONS_IN_INVERSION;
-    "Multiplications performed not as part of inversion": { MULTIPLICATIONS_PERFORMED() - MULTIPLICATIONS_IN_INVERSION() };
-    "Total multiplications performed": MULTIPLICATIONS_PERFORMED;
-    "Division iterations": DIVISION_ITERATIONS;
     "Euclidean iterations": EUCLIDEAN_ITERATIONS;
+    "Division iterations": DIVISION_ITERATIONS;
+    "Multiplications performed not as part of inversion": { MULTIPLICATIONS_PERFORMED() - EUCLIDEAN_ITERATIONS() };
+    "Total multiplications performed": MULTIPLICATIONS_PERFORMED;
 }

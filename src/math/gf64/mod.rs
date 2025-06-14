@@ -82,10 +82,12 @@ fn mul_u64_in_gf64_generic(mut lhs: u64, mut rhs: u64) -> u64 {
 static CPU_HAS_CARRYLESS_MULTIPLY: AtomicBool = AtomicBool::new(cfg!(target_feature = "pclmulqdq"));
 static CPU_HAS_LZCNT: AtomicBool = AtomicBool::new(cfg!(target_feature = "lzcnt"));
 
-pub fn check_cpu_support_for_carryless_multiply() {
+pub fn detect_cpu_features() {
+    #[cfg(not(feature = "no_clmul_check"))]
     if is_x86_feature_detected!("pclmulqdq") {
         CPU_HAS_CARRYLESS_MULTIPLY.store(true, Ordering::Relaxed);
     }
+    #[cfg(not(feature = "no_lzcnt_check"))]
     if is_x86_feature_detected!("lzcnt") {
         CPU_HAS_LZCNT.store(true, Ordering::Relaxed);
     }
@@ -149,7 +151,6 @@ impl GF64 {
                 quotient |= 1 << degree_diff;
             }
             (r, new_r) = (new_r, r);
-            MULTIPLICATIONS_IN_INVERSION.increment();
             (t, new_t) = (new_t, t ^ mul_u64_in_gf64(quotient, new_t));
             quotient = 0;
         }
