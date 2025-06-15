@@ -50,7 +50,7 @@ As a 65-bit polynomial cannot fit in the 64-bit variable $b$, the first iteratio
 
 The inverse and forward transforms are almost identical, except the outer loop direction and the inner operations are reversed.
 
-\begin{algorithm}[!htb]
+\begin{algorithm}[!hb]
     \caption{Transform Algorithms}
     \begin{algorithmic}
         \Function{InverseTransform}{\text{data}, \text{factors}}
@@ -226,14 +226,6 @@ This is because the errors in figure (a) are one contiguous burst, whereas the e
     
     \caption{Image source: \texttt{scipy.datasets.face} (derived from \url{https://pixnio.com/fauna-animals/raccoons/raccoon-procyon-lotor})}
 \end{figure}
-
-\clearpage
-
-\subsection{Image Generation Script}
-
-\begin{tiny}
-\lstinputlisting[language=Python, showstringspaces=false]{generate_figures.py}
-\end{tiny}
 
 \clearpage
 
