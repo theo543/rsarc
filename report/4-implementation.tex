@@ -84,7 +84,7 @@ The processor threads share the same precomputed factors, which depending on the
 
 \section{Benchmarks}
 
-Several kinds of benchmarks were implemented to measure the performance of various aspects of the implementation.
+Several kinds of benchmarks were implemented to measure the performance of various aspects of the implementation - finite field arithmetic, polynomial oversampling and recovery, and the full encoding and decoding process including disk I/O.
 
 \subsection{Polynomial Oversampling and Recovery}
 
@@ -102,3 +102,33 @@ However, even for a small block size of one kilobyte (equal to 128 64-bit symbol
 \end{center}
 \caption{Log-scale plot of polynomial oversampling and recovery benchmarks.}
 \end{figure}
+
+\subsection{Finite Field Arithmetic Benchmark}
+
+The results show that inversion by extended Euclidean algorithm is only slightly faster than inversion by raising to $2^{64 - 2}$.
+However, with the fallback multiplication algorithm, the extended Euclidean algorithm is much faster, since multiplications become more expensive.
+As expected, the Russian Peasant fallback multiplication is vastly slower than carry-less multiplication.
+
+\begin{table}[hbt]
+\centering
+\caption{Finite field arithmetic benchmark results, averaged over $2^{22}$ operations.}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Operation} & \textbf{Default} & \textbf{No CLMUL} \\
+\midrule
+Multiplication     & 1.94 ns   & 85.70 ns   \\
+Inversion (Euclid) & 356.10 ns & 2968.00 ns \\
+Inversion (Pow)    & 391.00 ns & 10236.15 ns \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{End-to-End Benchmark}
+
+The entire implementation was benchmarked by encoding a randomly generated file, corrupting it, and then decoding it, for file sizes from 1 GB to 128 GB.
+The benchmark was run on a system with 64 GB of memory and 20 CPU cores.
+To detect when the program is IO-bound, CPU usage was measured while running the benchmark with a sample rate of $0.2$ seconds, and CPU usage less than $20\%$ was considered IO-bound.
+
+The results show that both encoding and decoding are primarily IO-bound, with a significant slowdown for 64 GB and 128 GB files, when the file can no longer be loaded fully into memory.
+
+%TODO: add plot
