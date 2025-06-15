@@ -9,6 +9,7 @@ gf64_stats = []
 no_clmul_check = []
 no_lzcnt_check = []
 poly_benchmarks = []
+math_benchmarks = []
 
 [dependencies]
 fastrand = "2.3.0"

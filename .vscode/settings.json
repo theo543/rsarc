@@ -2,9 +2,6 @@
     "rust-analyzer.cargo.features": [
         "gf64_stats",
         "poly_benchmarks",
+        "math_benchmarks",
     ],
-    "cSpell.words": [
-        "ilog",
-        "nanos"
-    ]
 }

@@ -36,6 +36,12 @@ fn main() {
             return;
         }
 
+        #[cfg(feature = "math_benchmarks")]
+        "math_benchmarks" => {
+            math::benchmarks::math_benchmarks();
+            return;
+        }
+
         "encode" => {
             if args.len() != 6 {
                 println!("Usage: encode <input file> <output file> <block bytes> <parity blocks>");
