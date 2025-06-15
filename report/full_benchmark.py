@@ -67,7 +67,9 @@ def run_timed(command: str, name: str, log_file: Path):
         log.write(f"{name},{duration},{out[0]}\n")
 
 def main():
-    files = [(1024 * 1024 * 1024 * (2 ** x), f"GB{2 ** x}.bin") for x in range(0, 7)]
+    print(f"Start size = {2 ** int(argv[1])} GB, End size = {2 ** int(argv[2])} GB")
+
+    files = [(1024 * 1024 * 1024 * (2 ** x), f"GB{2 ** x}.bin") for x in range(int(argv[1]), int(argv[2]) + 1)]
     parity_count = [(size // BLOCK) * PARITY_PERCENT // 100 for size, _ in files]
 
     for (s, f) in files:

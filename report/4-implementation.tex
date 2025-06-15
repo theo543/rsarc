@@ -106,8 +106,8 @@ However, even for a small block size of one kilobyte (equal to 128 64-bit symbol
 \subsection{Finite Field Arithmetic Benchmark}
 
 The results show that inversion by extended Euclidean algorithm is only slightly faster than inversion by raising to $2^{64 - 2}$.
-However, with the fallback multiplication algorithm, the extended Euclidean algorithm is much faster, since multiplications become more expensive.
-As expected, the Russian Peasant fallback multiplication is vastly slower than carry-less multiplication.
+However, with carry-less multiplication disabled, the extended Euclidean algorithm is much faster, since multiplications become more expensive.
+As expected, the Russian Peasant fallback is vastly slower than carry-less multiplication.
 
 \begin{table}[hbt]
 \centering
@@ -122,13 +122,18 @@ Inversion (Pow)    & 391.00 ns & 10236.15 ns \\
 \bottomrule
 \end{tabular}
 \end{table}
+\vspace{-1em}
 
 \subsection{End-to-End Benchmark}
 
-The entire implementation was benchmarked by encoding a randomly generated file, corrupting it, and then decoding it, for file sizes from 1 GB to 128 GB.
-The benchmark was run on a system with 64 GB of memory and 20 CPU cores.
-To detect when the program is IO-bound, CPU usage was measured while running the benchmark with a sample rate of $0.2$ seconds, and CPU usage less than $20\%$ was considered IO-bound.
+The full implementation was benchmarked by encoding a randomly generated file, corrupting it, and then decoding it, with $20\%$ redundancy and a block size of $16$ KB.
 
-The results show that both encoding and decoding are primarily IO-bound, with a significant slowdown for 64 GB and 128 GB files, when the file can no longer be loaded fully into memory.
+To detect when only I/O is being performed, CPU usage over than $15\%$ was considered as indicating that significant computation is being performed, measured at a sample rate of $0.2$ seconds.
+This is not a precise measurement, but it suffices to show that the program is spending most of its time not in computation, but in I/O.
 
-%TODO: add plot
+\begin{figure}[!hbt]
+\begin{center}
+\input{end_to_end_benchmark.pgf}
+\end{center}
+\caption{Log-scale plot of end-to-end benchmarks.}
+\end{figure}

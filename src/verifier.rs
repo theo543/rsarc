@@ -1,6 +1,6 @@
 use std::{fs::File, io::{self, Read, Seek}};
 
-use crate::{header::{get_meta_hash, read_header, Header, HEADER_LEN, HEADER_STRING}, utils::IntoU64Ext};
+use crate::{header::{get_meta_hash, read_header, Header, HEADER_LEN, HEADER_STRING}, utils::{progress::progress, IntoU64Ext}};
 
 pub enum VerifyResult {
     Ok{data_errors: Vec<u64>, parity_errors: Vec<u64>, header: Header},
@@ -20,9 +20,11 @@ impl VerifyResult {
     }
 }
 
-pub fn verify_file(file: &mut File, hashes: &[u8], block_bytes: usize, blocks: usize, mut len: u64) -> io::Result<Vec<u64>> {
+pub fn verify_file(file: &mut File, hashes: &[u8], block_bytes: usize, blocks: usize, mut len: u64, name: &'static str) -> io::Result<Vec<u64>> {
     assert_eq!(hashes.len(), blocks * 40);
     assert_eq!(block_bytes % 8, 0);
+
+    let progress = progress(blocks.as_u64(), name);
 
     let mut errors = vec![];
     let mut block_buf = vec![0; block_bytes];
@@ -44,8 +46,10 @@ pub fn verify_file(file: &mut File, hashes: &[u8], block_bytes: usize, blocks: u
         if block_header != expected_block_header || *blake3::hash(&block_buf).as_bytes() != expected_block_hash {
             errors.push(i);
         }
+        progress.inc(1);
     }
     assert_eq!(len, 0);
+    progress.finish();
     Ok(errors)
 }
 
@@ -85,10 +89,10 @@ pub fn verify(input: &mut File, parity: &mut File) -> io::Result<VerifyResult> {
     let (data_hashes, par_hashes) = metadata[HEADER_LEN..].split_at(header.data_blocks * 40);
 
     input.seek(io::SeekFrom::Start(0))?;
-    let data_file = verify_file(input, data_hashes, header.block_bytes, header.data_blocks, input_len)?;
+    let data_file = verify_file(input, data_hashes, header.block_bytes, header.data_blocks, input_len, "Verifying data hashes")?;
 
     parity.seek(io::SeekFrom::Start(HEADER_LEN as u64 + hashes_bytes as u64))?;
-    let parity_file = verify_file(parity, par_hashes, header.block_bytes, header.parity_blocks, parity_bytes)?;
+    let parity_file = verify_file(parity, par_hashes, header.block_bytes, header.parity_blocks, parity_bytes, "Verifying parity hashes")?;
 
     Ok(VerifyResult::Ok{data_errors: data_file, parity_errors: parity_file, header})
 }
