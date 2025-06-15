@@ -245,3 +245,26 @@ The following Rust libraries were used in the implementation:
     \item \texttt{positioned-io} - Cross-platform random access file I/O.
     \item \texttt{sysinfo} - Obtains available memory for automatically selecting number of codes to process at once.
 \end{itemize}
+
+\section{Unit Tests}
+
+\label{appendix:unit}
+
+The following unit tests are used to validate the finite field and polynomial transform algorithms, using Rust's built-in unit testing framework:
+
+\begin{itemize}
+\item Addition is commutative.
+\item Inverting 0 raises an error.
+\item $1^{-1} = 1$.
+\item Euclidean algorithm inversion agrees with $x^{2^{64} - 2}$ inversion.
+\item $x * x^{-1} = 1$.
+\item $(x_1 * x_2 * \ldots * x_n) * (x_1^{-1} * x_2^{-1} * \ldots * x_n^{-1}) = 1$, with the multiplications performed in a random order.
+\item Multiplication is commutative.
+\item Oversampling a polynomial using the inverse and forward transforms agrees with standard polynomial evaluation.
+\item The formal derivative obtained by applying the inverse transform, performing the derivative in the non-monomial basis, then applying the forward transform, agrees with the standard formal derivative.
+\item Data recovery using the encoding and decoding algorithms correctly recovers the lost data (test performed in-memory, with no I/O), with various numbers of errors, including the maximum possible number of errors.
+\item Attempting to recover lost data with just one error over the maximum error limit results in incorrect data.
+      Data recovery fails with too many errors because it attempts to interpolate a polynomial of degree greater than or equal with $n$ with only $n$ values, when at least $n + 1$ values would be needed.
+\item When interpolating an oversampled polynomial, the excess coefficients are all zero.
+\item Roundtrip test of the forward and inverse transforms - when each is applied the same amount of times, in a random order, the output is the same as the input.
+\end{itemize}

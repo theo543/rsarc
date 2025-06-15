@@ -26,7 +26,7 @@ fn main() {
 
         #[cfg(feature = "gf64_stats")]
         "extended_euclidean_average_mul" => {
-            println!("Average multiplications used in extended Euclidean algorithm: {}", math::gf64::average_extended_euclidean_iterations());
+            println!("Average multiplications used in extended Euclidean algorithm: {}", math::gf64::average_extended_euclidean_iterations()); // each iteration uses one multiplication
             return;
         }
 

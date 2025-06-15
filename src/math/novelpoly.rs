@@ -142,7 +142,7 @@ pub fn formal_derivative(data: &mut [GF64], DerivativeFactors(factors): &Derivat
 pub fn compute_error_locator_poly(locations: &[u64], out_len: usize, t_factors: &TransformFactors, d_factors: &DerivativeFactors) -> (Vec<GF64>, Vec<GF64>) {
     //! Computes values of the error locator polynomial (x + e_0) * (x + e_1) * ... * (x + e_n) and values of the formal derivative in O(n log^2 n) time.
     assert!(!locations.is_empty());
-    assert!(out_len >= locations.len());
+    assert!(out_len > locations.len());
     assert!(out_len.is_power_of_two());
     assert_eq!(t_factors.offset, GF64(0));
 
@@ -221,20 +221,12 @@ mod tests {
             let factors = precompute_transform_factors(N.ilog2(), offset);
             let data = gf64_array::<N>();
             let mut roundtripped = data;
-            let mut roundtripped2 = data;
-
-            for _ in 0..10 {
-                forward_transform(&mut roundtripped, &factors);
-                inverse_transform(&mut roundtripped2, &factors);
+            let mut which_transform: [_; 100] = std::array::from_fn(|i| if i >= 50 { forward_transform } else { inverse_transform });
+            fastrand::shuffle(&mut which_transform);
+            for transform in which_transform {
+                transform(&mut roundtripped, &factors);
             }
-
-            for _ in 0..10 {
-                inverse_transform(&mut roundtripped, &factors);
-                forward_transform(&mut roundtripped2, &factors);            
-            }
-
-            assert_eq!(data, roundtripped);
-            assert_eq!(data, roundtripped2);
+            assert_eq!(roundtripped, data);
         }
 
         test::<1>();
@@ -381,6 +373,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn cannot_recover_from_too_many_errors() {
-        test_data_recovery(N - M + 1); // cannot recover, as the degree of f * e is N + 1, so interpolating with N values will almost certainly give the wrong result
+        test_data_recovery(N - M + 1); // cannot recover, as the degree of f * e is N, so interpolating with only N values will almost certainly give the wrong result
     }
 }
