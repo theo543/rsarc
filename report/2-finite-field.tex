@@ -44,7 +44,7 @@ A field must satisfy the following properties:
     \item Distributivity of multiplication over addition: $a \cdot (b + c) = a \cdot b + a \cdot c$
 \end{itemize}
 
-The theorems of polynomial mathematics used in Reed-Solomon codes only hold in a field, however standard computer arithmetic does not form a field.
+The theorems of polynomial mathematics used in Reed-Solomon codes only hold in a field. However, standard computer arithmetic does not form a field.
 Typical arithmetic supported natively by CPUs is fixed-size binary arithmetic with overflow, which is equivalent to arithmetic modulo a power of 2.
 Modular arithmetic only forms a field with a prime modulus, so it cannot be used directly for Reed-Solomon codes.
 
@@ -180,7 +180,7 @@ ax + by = \gcd(a, b) \label{eq:bezout}
 
 This algorithm is the standard method for computing the multiplicative inverse in finite fields - both for integers modulo a prime and polynomials modulo an irreducible polynomial.
 
-When setting $b$ to the modulus of the field, $gcd(a, p) = 1$ and $py = 0$. \ref{eq:bezout} becomes $ax = 1$, so $a$ is the multiplicative inverse of $x$ modulo $p$.
+When setting $b$ to the modulus of the field, $gcd(a, p) = 1$ and $py = 0$. \ref{eq:bezout} becomes $ax = 1$, so $x$ is the multiplicative inverse of $a$ modulo $p$.
 
 The basic structure of the algorithm is as follows:
 

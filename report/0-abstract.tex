@@ -17,7 +17,7 @@ Any $N$ blocks are sufficient to recover the original data, so up to $M$ corrupt
 As erasure codes require known error locations - the term 'erasure' refers to an error at a known location - a hash of each block is stored in the file header to detect corruption.
 
 The file is not a single Reed-Solomon code, as that would require reading the entire file into memory, limiting the maximum file size which can be processed.
-Instead, the file is interpreted as a matrix with $N + M$ rows, and each column is an separate Reed-Solomon code.
+Instead, the file is interpreted as a matrix with $N + M$ rows, and each column is a separate Reed-Solomon code.
 
 \vspace*{\fill}
 \begin{center}Source code available at \url{https://github.com/theo543/rsarc}\end{center}

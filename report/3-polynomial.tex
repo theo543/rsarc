@@ -15,7 +15,7 @@ The basis polynomials $X_i$ are defined as the products of polynomials $\hat{W}_
 $\hat{W}_i = \frac{W_i}{W_i(2^{i})}$ is a normalized vanishing polynomial of degree $2^{i}$, which vanishes (i.e. evaluates to zero) at the points $\omega_0, \omega_1, \ldots, \omega_{2^{i} - 1}$, and evaluates to $1$ at $\omega_{2^{i}}$.
 \begin{equation}\hat{W}_i(x) = \frac{W_i(x)}{W_i(2^{i})} = \frac{\prod_{j = 0}^{2^i - 1} (x - \omega_j)}{\prod_{j = 0}^{2^i - 1} (\omega_{2^i} - \omega_j)}\end{equation}
 
-$\hat{W}_i$ has degree $2^{i}$, as it is the product of $2^{i}$ degree one factors divided by a constant. Therefore, $X_i$ has degree $i$, since it the product of $W_j$ corresponding to the bits set in $i$.
+$\hat{W}_i$ has degree $2^{i}$, as it is the product of $2^{i}$ degree one factors divided by a constant. Therefore, $X_i$ has degree $i$, since it is the product of $W_j$ corresponding to the bits set in $i$.
 Since $\mathbb{X}$ contains $2^{64}$ polynomials with all degrees from $0$ to $2^{64} - 1$, it automatically is a valid basis for representing polynomials of degree up to $2^{64} - 1$.
 
 All $W_i$ are linearized polynomials, which means they only have non-zero coefficients at power-of-two indices and are additive:
@@ -80,7 +80,7 @@ See \ref{appendix:transforms} for pseudocode.
 
 \section{Formal Derivative}
 
-The error correction algorithm cannot directly use the inverse transform for interpolation, as the received data is not at contiguous points, and the number of non-corrupted points is likely not a power of two.
+The error correction algorithm cannot directly use the inverse transform for interpolation, as the received data is not at contiguous points, and the number of uncorrupted points is likely not a power of two.
 
 Instead, an algorithm based on the formal derivative is used which can recover the original polynomial from any $k$ intact points regardless of error location.
 
@@ -90,7 +90,7 @@ In all fields, the formal derivative of a polynomial is well-defined and the sta
 (\sum_{i = 0}^{n} a_i x^i)' = \sum_{i = 1}^{n} (i \cdot a_i) x^{i - 1}
 \end{gather*}
 
-The multiplication $i \cdot a_i$ between an integer and a field element is defined as repeated addition, which in \GF{n} is either zero or $a_i$, as $a_i + a_i = 0$.
+The multiplication $i \cdot a_i$ between an integer and a field element is defined as repeated addition. In \GF{n}, the result is either zero or $a_i$, as $a_i + a_i = 0$.
 \begin{equation}
 i \cdot a_i =
     \begin{cases}
