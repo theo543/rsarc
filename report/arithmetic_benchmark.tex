@@ -1,14 +1,14 @@
 \begin{table}[hbt]
 \centering
-\begin{tabular}{lrrr}
+\begin{tabular}{lrr}
 \toprule
-\textbf{Operation} & \textbf{Default} & \textbf{No CLMUL} & \textbf{No CLMUL \& LZCNT} \\
+\textbf{Operation} & \textbf{Default} & \textbf{No CLMUL} \\
 \midrule
-Multiplication     & 1.32 ns & 54.44 ns & 58.64 ns \\
-Inversion (Euclid) & 222.96 ns & 1883.14 ns & 2010.98 ns \\
-Inversion (Pow)    & 237.56 ns & 6618.4 ns & 6712.62 ns \\
+Multiplication     & 1.9 ns & 53.66 ns \\
+Inversion (Euclid) & 223.38 ns & 1917.71 ns \\
+Inversion (Pow)    & 240.02 ns & 6815.44 ns \\
 \bottomrule
 \end{tabular}
-\caption{Finite field arithmetic benchmark results, averaged over $2^{26}$ operations.}
+\caption{Finite field arithmetic benchmark results, averaged over $2^{28}$ operations.}
 \label{tab:arithmetic_benchmark}
 \end{table}
