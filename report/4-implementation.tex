@@ -109,19 +109,7 @@ The results show that inversion by extended Euclidean algorithm is only slightly
 However, with carry-less multiplication disabled, the extended Euclidean algorithm is much faster, since multiplications become more expensive.
 As expected, the Russian Peasant fallback is vastly slower than carry-less multiplication.
 
-\begin{table}[hbt]
-\centering
-\caption{Finite field arithmetic benchmark results, averaged over $2^{22}$ operations.}
-\begin{tabular}{lrr}
-\toprule
-\textbf{Operation} & \textbf{Default} & \textbf{No CLMUL} \\
-\midrule
-Multiplication     & 1.94 ns   & 85.70 ns   \\
-Inversion (Euclid) & 356.10 ns & 2968.00 ns \\
-Inversion (Pow)    & 391.00 ns & 10236.15 ns \\
-\bottomrule
-\end{tabular}
-\end{table}
+\input{arithmetic_benchmark.tex}
 \vspace{-1em}
 
 \subsection{End-to-End Benchmark}

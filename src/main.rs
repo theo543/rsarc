@@ -38,7 +38,7 @@ fn main() {
 
         #[cfg(feature = "math_benchmarks")]
         "math_benchmarks" => {
-            math::benchmarks::math_benchmarks();
+            math::benchmarks::math_benchmarks(args[2].parse().unwrap());
             return;
         }
 
