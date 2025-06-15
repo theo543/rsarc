@@ -31,7 +31,6 @@ Inversion (Pow)    & {results[0][2]} ns & {results[1][2]} ns & {results[2][2]} n
 
 table = """\\begin{table}[hbt]
 \\centering
-\\caption{Finite field arithmetic benchmark results, averaged over """ + f"$2^{{{POW}}}$"  + """ operations.}
 \\begin{tabular}{lrrr}
 \\toprule
 \\textbf{Operation} & \\textbf{Default} & \\textbf{No CLMUL} & \\textbf{No CLMUL \\& LZCNT} \\\\
@@ -40,6 +39,8 @@ table = """\\begin{table}[hbt]
 + table_results + \
 """\\bottomrule
 \\end{tabular}
+\\caption{Finite field arithmetic benchmark results, averaged over """ + f"$2^{{{POW}}}$"  + """ operations.}
+\\label{tab:arithmetic_benchmark}
 \\end{table}
 """
 

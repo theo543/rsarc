@@ -1,9 +1,21 @@
 \chapter{Conclusions}
 
-The file metadata is currently not protected from corruption.
-This can be addressed by adding meta-parity blocks among the parity blocks.
-Although the metadata is generally small, and therefore unlikely to be corrupted, this is a significant flaw in the current implementation.
+The implementation has been successfully tested and verified to generate parity data and repair errors in $O(n \log n)$ time (figure \ref{fig:benchmark_log_poly})
+using Reed-Solomon codes based on finite field arithmetic and polynomial FFT-like transforms introduced in \cite{novel-poly}.
 
-The implementation can successfully generate parity data and repair file corruption using Reed-Solomon codes in $O(n \log n)$ time.
+Correctness is verified through unit tests for the IO-free algorithms (\ref{appendix:unit}), as well as testing of the full encode-decode sequence on-disk with simulated file corruption.
 
-Correctness is ensured using unit tests for the IO-free part of the implementation - the finite field arithmetic and polynomial algorithms - and end-to-end testing for the entire encoding and decoding sequence, using simulated file corruption.
+The performance of the implementation is satisfactory, and benchmarks show that the process is mostly IO-bound (figure \ref{fig:end_to_end_benchmark}).
+
+The fundamental arithmetic operations used are \GF{64} multiplication, which is made extremely fast by using carry-less multiplication,
+with a speedup of over 50x compared to the Russian Peasant algorithm (table \ref{tab:arithmetic_benchmark}), and \GF{64} addition which is XOR.
+
+\vspace{-1.5em}
+\section{Future Improvement Directions}
+\vspace{-0.5em}
+
+The file metadata is not protected from corruption. This could be addressed by adding meta-parity blocks among the parity blocks, used to repair file header corruption, located using a special marker and hash placed in each meta-parity block.
+
+The IO architecture could be extended to support using multiple files or entire directories, as input data, as well as to support multiple parity files - similar to PAR2 files - and single-file combined data and parity archives - similar to RAR archives.
+
+

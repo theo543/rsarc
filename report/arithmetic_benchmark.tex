@@ -1,6 +1,5 @@
 \begin{table}[hbt]
 \centering
-\caption{Finite field arithmetic benchmark results, averaged over $2^{26}$ operations.}
 \begin{tabular}{lrrr}
 \toprule
 \textbf{Operation} & \textbf{Default} & \textbf{No CLMUL} & \textbf{No CLMUL \& LZCNT} \\
@@ -10,4 +9,6 @@ Inversion (Euclid) & 222.96 ns & 1883.14 ns & 2010.98 ns \\
 Inversion (Pow)    & 237.56 ns & 6618.4 ns & 6712.62 ns \\
 \bottomrule
 \end{tabular}
+\caption{Finite field arithmetic benchmark results, averaged over $2^{26}$ operations.}
+\label{tab:arithmetic_benchmark}
 \end{table}

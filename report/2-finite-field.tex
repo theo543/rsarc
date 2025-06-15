@@ -169,7 +169,7 @@ The functions $\text{upper}(x)$ and $\text{lower}(x)$ return the upper and lower
 \subsection{Extended Euclidean Algorithm}
 
 A simple way to compute the multiplicative inverse is to raise the element to the power of $2^{64} - 2$ using exponentiation by squaring.
-This was used in the early stages of this project, however it is not the most efficient method - it uses $126$ multiplications.
+This was used in the early stages of this project, however it requires $126$ multiplications.
 It is still used in a unit test to check the results given by the more complex algorithm.
 
 The extended Euclidean algorithm is an extension to the well-known Euclidean algorithm for computing GCD, which also computes coefficients of Bezout's identity, a linear combination of the inputs that equals the GCD:
