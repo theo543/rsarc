@@ -16,12 +16,22 @@ use std::fs::OpenOptions;
 use encoder::{encode, repair, EncodeOptions};
 use utils::ShareModeExt;
 
+fn err_exit() -> ! {
+    std::process::exit(1);
+}
+
 fn main() {
     math::gf64::detect_cpu_features();
     utils::progress::register_panic_hook();
 
     let args: Vec<String> = std::env::args().collect();
-    match args.get(1).map(|x| x.as_str()).unwrap_or("test") {
+
+    if args.len() < 2 {
+        println!("Supported commands: test, encode, verify, repair, reassemble");
+        err_exit();
+    }
+
+    match args[1].as_str() {
         "test" => end_to_end_test::test().unwrap(),
 
         #[cfg(feature = "gf64_stats")]
@@ -45,7 +55,7 @@ fn main() {
         "encode" => {
             if args.len() != 6 {
                 println!("Usage: encode <input file> <output file> <block bytes> <parity blocks>");
-                return;
+                err_exit();
             }
             let input_file = &args[2];
             let output_file = &args[3];
@@ -61,7 +71,7 @@ fn main() {
         "verify" => {
             if args.len() != 4 {
                 println!("Usage: verify <input file> <output file>");
-                return;
+                err_exit();
             }
             let input_file = &args[2];
             let output_file = &args[3];
@@ -75,7 +85,7 @@ fn main() {
         "repair" => {
             if args.len() != 4 {
                 println!("Usage: repair <input file> <output file>");
-                return;
+                err_exit();
             }
             let input_file = &args[2];
             let output_file = &args[3];
@@ -100,7 +110,7 @@ fn main() {
         "reassemble" => {
             if args.len() != 6 {
                 println!("Usage: reassemble <data file> <parity file> <output data file> <output parity file>");
-                return;
+                err_exit();
             }
             let data_file = &args[2];
             let parity_file = &args[3];
@@ -116,7 +126,10 @@ fn main() {
             println!("Found {} data blocks and {} parity blocks", recovered_data, recovered_parity);
         }
 
-        _ => println!("Unknown command"),
+        _ => {
+            println!("Unknown command");
+            err_exit();
+        }
     }
 
     math::gf64::print_stats();

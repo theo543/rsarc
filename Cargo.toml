@@ -2,7 +2,17 @@
 name = "rsarc"
 version = "0.1.0"
 edition = "2021"
-default-run = "rsarc"
+license = "MIT OR Apache-2.0"
+description = "Reed-Solomon erasure coding utility for repairing file corruption with O(n log n) performance."
+repository = "https://github.com/theo543/rsarc"
+readme = "./README.md"
+categories = ["command-line-utilities"]
+keywords = ["reed-solomon", "erasure", "ecc"]
+exclude = [
+    "*.pdf",
+    "report/*",
+    ".vscode/*",
+]
 
 [features]
 gf64_stats = []
