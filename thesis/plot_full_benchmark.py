@@ -28,10 +28,12 @@ plt.yscale('log', base=2)
 plt.xscale('log', base=2)
 plt.grid()
 
-plt.xlabel('file size (GB)')
+plt.xlabel('file size')
 plt.ylabel('time (ns)')
 
-plt.gca().set_yticks([2**i for i in range(30, 44)])
+plt.xticks([2**i for i in range(0, 8)])
+plt.gca().set_xticklabels([f"{2**i} GB" for i in range(0, 8)])
+plt.yticks([2**i for i in range(30, 44)])
 
 plt.legend(loc='upper left', fontsize='small')
 plt.savefig('end_to_end_benchmark.pgf', bbox_inches='tight')
