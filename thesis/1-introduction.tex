@@ -35,8 +35,8 @@ Since a single error is enough to corrupt a block, the program is best suited at
 Since a block size close to the disk sector size is desirable to minimize the impact of errors, the amount of symbols in a code can be very large.
 This requires algorithms which can handle large codes efficiently, with sub-quadratic time complexity.
 
-I implemented a Reed-Solomon code which supports up to $2^{64}$ blocks, and most importantly allows $O(n \log n)$ FFT-like transforms which can be used for efficient encoding and decoding,
-by using a polynomial basis introduced in \cite{novel-poly} over polynomials in the finite field \GF{64}.
+I implemented a Reed-Solomon code which supports up to $2^{64}$ blocks, and most importantly uses $O(n \log n)$ FFT-like transforms for efficient encoding and decoding,
+by using a polynomial basis introduced in \cite{novel-poly} for polynomials over the finite field \GF{64}.
 
 The implementation also uses efficient algorithms for the finite field arithmetic which is at the root of Reed-Solomon codes, using a modern CPU feature - carry-less multiplication \cite{intel-clmul} - for fast finite field multiplication.
 

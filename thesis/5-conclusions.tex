@@ -1,5 +1,6 @@
+\vspace{-3.5em}
 \chapter{Conclusions}
-
+\vspace{-1.5em}
 The implementation has been successfully tested and verified to generate parity data and repair errors in $O(n \log n)$ time (figure \ref{fig:benchmark_log_poly})
 using Reed-Solomon codes based on finite field arithmetic and polynomial FFT-like transforms introduced in \cite{novel-poly}.
 
@@ -8,7 +9,9 @@ Correctness is verified through unit tests for the IO-free algorithms (\ref{appe
 The performance of the implementation is satisfactory, and benchmarks show that the process is mostly IO-bound (figure \ref{fig:end_to_end_benchmark}).
 
 The fundamental arithmetic operations used are \GF{64} multiplication, which is made extremely fast by using carry-less multiplication,
-with a speedup of over 50x compared to the Russian Peasant algorithm (table \ref{tab:arithmetic_benchmark}), and \GF{64} addition which is XOR.
+with a speedup of over 25x compared to the Russian Peasant algorithm (table \ref{tab:arithmetic_benchmark}), and \GF{64} addition which is XOR.
+
+Division is over 100x slower than multiplication, however all inverses can be computed before entering the main loop.
 
 \vspace{-1.5em}
 \section{Future Improvement Directions}
@@ -19,3 +22,4 @@ The file metadata is not protected from corruption. This could be addressed by a
 The IO architecture could be extended to support using multiple files or entire directories, as input data, as well as to support multiple parity files - similar to PAR2 files - and single-file combined data and parity archives - similar to RAR archives.
 
 Support for architectures with carry-less multiplication other than x86 could be added, such as ARM and RISC-V.
+\enlargethispage{\baselineskip}
