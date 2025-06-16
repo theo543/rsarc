@@ -44,28 +44,18 @@ A field must satisfy the following properties:
     \item Distributivity of multiplication over addition: $a \cdot (b + c) = a \cdot b + a \cdot c$
 \end{itemize}
 
-The theorems of polynomial mathematics used in Reed-Solomon codes only hold in a field. However, standard computer arithmetic does not form a field.
-Typical arithmetic supported natively by CPUs is fixed-size binary arithmetic with overflow, which is equivalent to arithmetic modulo a power of 2.
-Modular arithmetic only forms a field with a prime modulus, so it cannot be used directly for Reed-Solomon codes.
+The theorems of polynomial mathematics used in Reed-Solomon codes only hold in a field. However, standard computer arithmetic - integer arithmetic modulo a power of two - does not form a field.
+Modular arithmetic only forms a field with a prime modulus, so it cannot be used directly for Reed-Solomon codes. The finite field \GF{64} is used instead.
 
-For example, the operation $x \cdot 2$ is not invertible, as it is equivalent to a left shift, from which the most significant bit of $x$ cannot be recovered.
+For example, the operation $x \cdot 2$ is not invertible, since the most significant bit is lost.
 
-Fortunately, it is possible to construct a field based on fixed-size integers, such as 64-bit integers.
+In a finite field $\text{GF}(p^m)$, where $p$ is a prime number, the elements are polynomials of degree $m - 1$, with coefficients in $\text{GF}(p)$.
+For the \GF{n} case, an element in the field is a polynomial with $n$ coefficients, where each coefficient is a bit.
 
-In a finite field $\text{GF}(p^m)$, where $p$ is a prime number and $m$ is a positive integer, the elements are polynomials of degree $m - 1$, with coefficients in $\text{GF}(p)$.
-For the \GF{n} case, an element in the field is a polynomial with $n$ coefficients, where each coefficient is a bit (i.e. a value in $\text{GF}(2)$ = $\{0, 1\}$).
-For the purposes of this project, $n$ is always 64, so the field is \GF{64}.
-
-The notation $\omega_i$ is used to denote the integer $i$ converted to an element of the field \GF{64} by interpreting its bits as a polynomial, which is a no-op in code, as elements of \GF{64} are stored as 64-bit integers.
-
-It is important to note that these polynomials are not the same as the ones used in Reed-Solomon codes to represent data and parity information.
-Elements of \GF{n} are simply $n$ bit integers with more complex arithmetic. They are polynomials over $\text{GF}(2)$, with $n$ coefficients.
-Reed-Solomon polynomials can be arbitrarily long. They are polynomials over \GF{64}, with an arbitrary number of coefficients, and each coefficient is itself a polynomial over \GF{2} with $64$ coefficients.
+The notation $\omega_i$ is used to denote the integer $i$ converted to an element of the field \GF{n} by interpreting its bits as a polynomial.
 
 Finite field addition is defined as polynomial addition.
-In a general field $\text{GF}(p^m)$, this would be implemented as pairwise addition of the coefficients of two polynomials, modulo $p$.
-
-In binary finite fields, addition is equivalent to XOR, as the coefficients are bits. Therefore, $x + x = 0$, and $x = -x$ (the field has characteristic 2).
+In \GF{n}, this is equivalent to XOR, as the coefficients are bits. $x + x = 0$ and $x = -x$ i.e. the field has characteristic 2.
 
 Multiplication is defined as polynomial multiplication, followed by reduction modulo an irreducible polynomial of degree 64 (with $65$ coefficients, where the highest coefficient is $1$).
 
@@ -76,83 +66,34 @@ The choice of irreducible polynomial does not affect correctness, and the fields
 
 The efficiency of finite field arithmetic is crucial for the performance of the encoding and decoding algorithms.
 
-Addition is simple and fast, as it is equivalent to XOR.
-Multiplication, however, is slower and more complicated than integer multiplication, and division even more so.
-
-\subsection{Russian Peasant Algorithm}
-
-The Russian peasant algorithm multiplies two values in \GF{64} without requiring 128-bit integers.
-It incrementally performs the multiplication by adding intermediate values into an accumulator, and slowly shifting the values to be multiplied and applying polynomial reduction.
-
-This algorithm is fairly simple and easy to implement, however multiplication can be done far more efficiently on modern CPUs using carry-less multiplication.
-Still, this algorithm is necessary as a fallback for older CPUs.
-
-The state of the algorithm consists of the two values to be multiplied $a$ and $b$, and an accumulator.
-
-At each iteration, if the low bit of $b$ is set, the accumulator is XORed with $a$.
-Then, $a$ is shifted left, and $b$ is shifted right.
-
-This is justified because, at each step, we multiply the lowest coefficient of $b$ with $a$, and add the result (either $0$ or $a$) to the accumulator.
-Then, moving on to the next coefficient of $b$, we divide $b$ by $x$ and multiply $a$ by $x$.
-
-If the high bit of $a$ was set before shifting, $a$ is XORed with the irreducible polynomial, excluding the highest coefficient which would not fit in 64 bits.
-Conceptually, $a$ now has a 65th bit (a coefficient $x^{64}$), which is removed by subtracting the irreducible polynomial.
-
-\begin{algorithm}
-\caption{Russian Peasant Multiplication}
-\begin{algorithmic}
-\Function{Multiply}{$a, b$}
-\State $acc \gets 0$
-\For{$\text{i} \gets 1 \text{ to } 64$}
-    \If{$b \bitand 1$}
-        \State $acc \gets acc \oplus a$
-    \EndIf
-    \State $\text{carry} \gets a \bitand (1 \ll 63)$
-    \State $a \gets a \ll 1$
-    \State $b \gets b \gg 1$
-    \If{$\text{carry}$}
-        \State $a \gets a \oplus \text{POLYNOMIAL}$ 
-    \EndIf
-\EndFor
-\State \Return $acc$
-\EndFunction
-\end{algorithmic}
-\end{algorithm}
-
 \subsection{Carry-less Multiplication}
 
 \GF{64} multiplication can be performed using only three 128-bit carry-less multiplication operations.
 Modern CPUs have support for this operation, as it is useful for cryptographic algorithms, computing checksums, and other applications. \cite{intel-clmul}
 
-The terms "upper half" and "lower half" will be used to refer to the most significant 64 bits and least significant 64 bits of a 128-bit integer, respectively.
-
 By multiplying $a$ and $b$ using carry-less multiplication, we obtain a 128-bit result.
-We must reduce the upper half to a 64-bit result, which can then be XORed with the lower half to obtain the final result.
+We must reduce the upper bits to a 64-bit result, which can then be XORed with the lower bits to obtain the final result.
 
-This can be done by multiplying the upper half of the result by the irreducible polynomial.
-Then, the lower half of the result is the product reduced modulo the irreducible polynomial.
+This can be done by multiplying the upper bits of the result by the irreducible polynomial.
 
 To understand why this works, consider the process of reduction.
-The irreducible polynomial is aligned with each set bit in the upper half of the result, and XORed with the result.
-This is effectively what carry-less multiplication does.
+The irreducible polynomial is aligned with each set bit in the upper bits of the result, and XORed with the result.
+This is \textit{almost} what carry-less multiplication does.
 
-There is a complication, however.
-A third multiplication is required to ensure full reduction, as the highest bits of the upper half can affect the lowest bits of the upper half.
+There is a complication.
+A third multiplication is required to ensure full reduction, as the highest bits of the upper bits can affect the lowest bits of the upper bits.
 
 For fields where $x^{n - 1} + 1$ is irreducible, two multiplications would suffice, but this is not the case for \GF{64}.
 
 For example, consider $x^{127} + x^{67} + x^{66} + x^{64}$.
-After aligning the irreducible polynomial with the highest bit and XORing, all bits in the upper half are zero.
+After aligning the irreducible polynomial with the highest bit and XORing, all bits in the upper bits are zero.
 At this point, the reduction is complete and should stop.
-However, this is not how carry-less multiplication works.
-The irreducible polynomial will also be aligned with the other three bits, and the lower half is XORed with some unnecessary values.
+However, this is not how carry-less multiplication works. It will also process the other three bits, XORing the lower bits with some unnecessary values.
 
-The upper half of the reduced result if and where this happened. A third multiplication will correct this.
-The unnecessary XORs are undone by XORing with the lower half of the third multiplication.
+The upper bits of the reduced result indicate where this happened. A third multiplication can cancel out the unnecessary XORs.
+The XOR of the three 64 lower bits is the final result.
 
 The justification for the algorithm may seem somewhat complex, but the algorithm itself is very short, simple, and efficient.
-
-The functions $\text{upper}(x)$ and $\text{lower}(x)$ return the upper and lower 64 bits of $x$.
 
 \begin{algorithm}
 \caption{Carry-less Multiplication}
@@ -201,3 +142,31 @@ The basic structure of the algorithm is as follows:
 
 See \ref{appendix:euclidean} for details of the implementation.
 This algorithm, unlike the $x^{2^{64} - 2}$ method, only uses around $32.5$ multiplications when inverting a random element in \GF{64}.
+
+\subsection{Russian Peasant Algorithm}
+
+The Russian peasant algorithm multiplies two values in \GF{64} without requiring 128-bit integers.
+It incrementally performs the multiplication by adding intermediate values into an accumulator, and slowly shifting the values to be multiplied and applying polynomial reduction.
+
+This algorithm is necessary as a fallback for older CPUs which do not support carry-less multiplication.
+
+\begin{algorithm}
+\caption{Russian Peasant Multiplication}
+\begin{algorithmic}
+\Function{Multiply}{$a, b$}
+\State $acc \gets 0$
+\For{$\text{i} \gets 1 \text{ to } 64$}
+    \If{$b \bitand 1$}
+        \State $acc \gets acc \oplus a$
+    \EndIf
+    \State $\text{carry} \gets a \bitand (1 \ll 63)$
+    \State $a \gets a \ll 1$
+    \State $b \gets b \gg 1$
+    \If{$\text{carry}$}
+        \State $a \gets a \oplus \text{POLYNOMIAL}$ 
+    \EndIf
+\EndFor
+\State \Return $acc$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
