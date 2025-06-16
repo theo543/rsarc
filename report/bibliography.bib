@@ -1,4 +1,4 @@
-@inproceedings{theory-of-error-correcting-codes,
+@book{theory-of-error-correcting-codes,
   title={The Theory of Error-Correcting Codes},
   author={F. Jessie MacWilliams and N. J. A. Sloane},
   year={1977},
@@ -44,4 +44,90 @@
     urldate = {2025-01-31},
 }
 
+@online{google-cloud,
+    author = {Google Cloud},
+    title = {Data availability and durability},
+    year = {2025},
+    url = {https://cloud.google.com/storage/docs/availability-durability},
+    urldate = {2025-06-16},
+}
 
+@online{azure,
+    author = {Microsoft Azure},
+    title = {Azure Storage redundancy},
+    year = {2025},
+    url = {https://learn.microsoft.com/en-us/azure/storage/common/storage-redundancy},
+    urldate = {2025-06-16},
+}
+
+@online{backblaze,
+    author = {Brian Beach},
+    title = {Backblaze Open-sources Reed-Solomon Erasure Coding Source Code},
+    year = {2015},
+    url = {https://www.backblaze.com/blog/reed-solomon/},
+    urldate = {2025-06-16},
+}
+
+@article{radiation-errors,
+author = {Baumann, R.},
+year = {2005},
+month = {10},
+pages = {305 - 316},
+title = {Radiation-induced soft errors in advanced semiconductor technologies},
+volume = {5},
+journal = {Device and Materials Reliability, IEEE Transactions on},
+doi = {10.1109/TDMR.2005.853449}
+}
+
+@inproceedings{dram-errors-in-the-wild,
+  author = {Schroeder, Bianca and Pinheiro, Eduardo and Weber, Wolf-Dietrich},
+  year = {2009},
+  month = {01},
+  pages = {193-204},
+  title = {DRAM errors in the wild: A large-scale field study},
+  volume = {54},
+  journal = {Commun. ACM},
+  doi = {10.1145/1555349.1555372},
+}
+
+@article{raid-case,
+  author = {Patterson, David and Gibson, Garth and Katz, Randy},
+  year = {1988},
+  month = {07},
+  pages = {},
+  title = {A case for Redundant Arrays of Inexpensive Disks (RAID)},
+  volume = {17},
+  isbn = {0897912683},
+  journal = {ACM SIGMOD Record},
+  doi = {10.1145/50202.50214}
+}
+
+@Article{zfs-vs-btrfs,
+  AUTHOR = {Dakic, Vedran and Kovac, Mario and Videc, Igor},
+  TITLE = {High-Performance Computing Storage Performance and Design Patterns—Btrfs and ZFS Performance for Different Use Cases},
+  JOURNAL = {Computers},
+  VOLUME = {13},
+  YEAR = {2024},
+  NUMBER = {6},
+  ARTICLE-NUMBER = {139},
+  URL = {https://www.mdpi.com/2073-431X/13/6/139},
+  ISSN = {2073-431X},
+  ABSTRACT = {Filesystems are essential components in contemporary computer systems that organize and manage data. Their performance is crucial in various applications, from web servers to data storage systems. This paper helps to pick the suitable filesystem by comparing btrfs with ZFS by considering multiple situations and applications, ranging from sequential and random performance in the most common use cases to extreme use cases like high-performance computing (HPC). It showcases each option’s benefits and drawbacks, considering different usage scenarios. The performance of btrfs and ZFS will be evaluated through rigorous testing. They will assess their capabilities in handling huge files, managing numerous small files, and the speed of data read and write across varied usage levels. The analysis indicates no definitive answer; the selection of the optimal filesystem is contingent upon individual data-access requirements.},
+  DOI = {10.3390/computers13060139}
+}
+
+@online{ecc-market,
+  author  = {TechSci Research},
+  title   = {ECC Memory Market to Grow with a CAGR of 6.30\% through 2029},
+  note    = {Press Release},
+  url     = {https://www.techsciresearch.com/news/13818-ecc-memory-market.html},
+  urldate = {2025-06-16}
+}
+
+@online{azure-ecc,
+  author  = {Scott Field},
+  title   = {Microsoft Azure uses Error-Correcting Code memory for enhanced reliability and security},
+  year    = {2015},
+  url     = {https://azure.microsoft.com/de-de/blog/microsoft-azure-uses-error-correcting-code-memory-for-enhanced-reliability-and-security/},
+  urldate = {2025-06-16},
+}

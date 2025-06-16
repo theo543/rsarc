@@ -3,18 +3,19 @@
 Data corruption is a significant issue in software and hardware systems, which can lead to data loss, incorrect program behavior, and system failures.
 
 It is impossible in general to prevent errors due to uncontrolled factors such as electromagnetic interference, cosmic rays, or hardware defects, not to mention software bugs.
-Even data stored in memory or in CPU registers and cache can rarely be randomly corrupted, which must be accounted for in massive systems where it is statistically likely that regular errors will occur.
+Even data stored in memory or in CPU registers and cache can rarely be corrupted, which must be accounted for in large-scale systems where it is statistically likely that errors will occur.
+\cite{radiation-errors, dram-errors-in-the-wild}
 
 While in some cases only error detection is required, such as for network protocols which can resend data, in other cases full error correction is necessary, such as in cloud storage, backups, ECC RAM, RAID systems, and more.
 
 Error detection and correction is a major area of research in the field of computer science, and many companies invest heavily in ensuring the robustness of their systems against random errors:
 
 \begin{itemize}
-    \item Major cloud storage providers guarantee that data is stored redundantly and split across multiple locations, and that it is regularly scanned for errors.
-    \item Server hardware often includes ECC memory, which can transparently correct certain errors in RAM, and which will crash the system instead of silently saving corrupted data when it cannot be corrected.
-    \item Modern filesystems such as ZFS and Btrfs automatically detect block-level errors using checksums, and have built-in support for redundancy.
+    \item Major cloud storage providers often guarantee that data is stored redundantly and split across multiple locations, and that it is regularly scanned for errors. \cite{azure, backblaze, google-cloud}
+    \item Server hardware often includes ECC memory, which can transparently correct certain errors in RAM, and which will crash the system instead of silently saving corrupted data when it cannot be corrected. \cite{ecc-market, azure-ecc}
+    \item Modern filesystems such as ZFS and Btrfs automatically detect block-level errors using checksums, and have built-in support for redundancy. \cite{zfs-vs-btrfs}
     \item RAID technology (Redundant Array of Independent Disks) can combine multiple disk drives into one logical unit, and store data redundantly such that a disk failure causes no data loss,
-          with various configurations allowing for different tradeoffs between storage capacity and redundancy.
+          with various configurations allowing for different tradeoffs between storage capacity and redundancy. \cite{raid-case}
 \end{itemize}
 
 While merely detecting errors with checksums or hashes is easy, being able to correct them without having full copies of the data is a complex task that requires error-correcting codes (ECC).
