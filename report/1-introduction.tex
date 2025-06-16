@@ -6,42 +6,36 @@ It is impossible in general to prevent errors due to uncontrolled factors such a
 Even data stored in memory or in CPU registers and cache can rarely be corrupted, which must be accounted for in large-scale systems where it is statistically likely that errors will occur.
 \cite{radiation-errors, dram-errors-in-the-wild}
 
-While in some cases only error detection is required, such as for network protocols which can resend data, in other cases full error correction is necessary, such as in cloud storage, backups, ECC RAM, RAID systems, and more.
-
 Error detection and correction is a major area of research in the field of computer science, and many companies invest heavily in ensuring the robustness of their systems against random errors:
 
-\begin{itemize}
+\begin{itemize}[nosep]
     \item Major cloud storage providers often guarantee that data is stored redundantly and split across multiple locations, and that it is regularly scanned for errors. \cite{azure, backblaze, google-cloud}
     \item Server hardware often includes ECC memory, which can transparently correct certain errors in RAM, and which will crash the system instead of silently saving corrupted data when it cannot be corrected. \cite{ecc-market, azure-ecc}
     \item Modern filesystems such as ZFS and Btrfs automatically detect block-level errors using checksums, and have built-in support for redundancy. \cite{zfs-vs-btrfs}
-    \item RAID technology (Redundant Array of Independent Disks) can combine multiple disk drives into one logical unit, and store data redundantly such that a disk failure causes no data loss,
-          with various configurations allowing for different tradeoffs between storage capacity and redundancy. \cite{raid-case}
+    \item RAID technology (Redundant Array of Independent Disks) can combine multiple disk drives into one logical unit, using some disks for redundancy. \cite{raid-case}
 \end{itemize}
 
-While merely detecting errors with checksums or hashes is easy, being able to correct them without having full copies of the data is a complex task that requires error-correcting codes (ECC).
+While merely detecting errors only requires checksums or hashes, recovery from errors without needing to keep a full second copy of the data requires error-correcting codes (ECC).
 
-A major family of error-correcting codes is Reed-Solomon codes, which have a wide range of applications, such as in CDs, DVDs, radio transmissions, QR codes, and more.
-Some configurations of RAID arrays use Reed-Solomon codes to recover from more than one simultaneous disk failure.
+Reed-Solomon codes are a major family of error-correcting codes, with a wide range of applications, such as in CDs, DVDs, radio communication, QR codes, RAID, and many more.
 
-A less common application of error-correcting codes, which this project focuses on, is recovering errors within one file.
-Since disk errors often result in bad sectors, not necessarily full disk failures, it is useful to be able to repair a file with a few corrupted regions, without needing full copies of the file.
+A less common application of error-correcting codes, which this project focuses on, is recovering errors at the level of a file.
+Since disk errors often result in bad sectors, not necessarily full disk failures, it is useful to be able to repair a file with a few corrupt sectors.
 
-For this purpose, I implemented a multithreaded command-line utility which generates Reed-Solomon parity data to repair corruption in a file using interleaved Reed-Solomon codes, without using external libraries for the Reed-Solomon implementation.
+For this purpose, I implemented a multithreaded CLI utility which generates parity data to repair errors using interleaved Reed-Solomon codes.
 The program is written in Rust, a language well-suited for implementing fast system utilities, and which enables safe multithreading and memory management.
 
-The file is divided into $N$ data blocks, and the parity file can contain an arbitrary number $M$ of parity blocks.
-This scheme can be viewed as RAID with $N + M$ drives, however the drives are not physical disks, but instead regions in one drive,
-or it can be viewed as interpreting the file as a matrix with $N + M$ rows, where each column is an independent Reed-Solomon code which can be processed independently.
-This has the drawback of a non-contiguous access pattern, which hurts performance when the data does not fit into memory.
+The file is divided into $N$ data blocks, and $M$ parity blocks are generated and stored in a separate file.
+This scheme can be viewed as RAID with $N + M$ drives, or as interpreting the data as a matrix with $N + M$ rows, where each column is an independent Reed-Solomon code, the latter $M$ rows being the parity file.
+This has the drawback of a non-contiguous access pattern, which harms I/O performance.
 
-Errors are detected using hashes of each block. A non-matching hash is considered a total loss of the block, similar to a disk failure. Any combination of $N$ blocks is sufficient to recover the original data.
-Since a single error is enough to corrupt a block, errors clustered together have much less impact than errors spread across many blocks, i.e. the code is better at recovering from burst errors than from uniform errors.
+Errors are detected using hashes of each block.
+Since a single error is enough to corrupt a block, the program is best suited at recovering from burst errors, such as those caused by a bad sector, which are clustered together in few blocks.
 
-Since the number of blocks can be extremely large, as smaller blocks result in larger code sizes, and block sizes smaller or equal to disk sector sizes are desirable for maximum error correction capacity,
-efficient Reed-Solomon algorithms with sub-polynomial complexity are necessary.
-Typical algorithms used for RAID systems are not suitable, since they assume a small amount of drives, and generally do not support more than $256$ blocks (due to a small field size).
+Since a block size close to the disk sector size is desirable to minimize the impact of errors, the amount of symbols in a code can be very large.
+This requires algorithms which can handle large codes efficiently, with sub-quadratic time complexity.
 
-Instead, I implemented a Reed-Solomon code which supports up to $2^{64}$ blocks, and most importantly allows $O(n \log n)$ FFT-like transforms which can be used for efficient encoding and decoding,
+I implemented a Reed-Solomon code which supports up to $2^{64}$ blocks, and most importantly allows $O(n \log n)$ FFT-like transforms which can be used for efficient encoding and decoding,
 by using a polynomial basis introduced in \cite{novel-poly} over polynomials in the finite field \GF{64}.
 
 The implementation also uses efficient algorithms for the finite field arithmetic which is at the root of Reed-Solomon codes, using a modern CPU feature - carry-less multiplication \cite{intel-clmul} - for fast finite field multiplication.
