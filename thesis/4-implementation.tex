@@ -51,7 +51,6 @@ If necessary, the batching could be done manually, collecting output symbols in 
 
 The same I/O code is used for both encoding and decoding.
 When decoding, system calls are used to read uncorrupted symbols from both files, and memory mapped I/O is used to write recovered symbols to both files.
-The architecture could be extended to process an arbitrary number of files, such as multiple parity files, single-file archives combining data and parity, or arbitrary folder structures as data instead of a single file.
 
 \section{Multithreaded Processing}
 
@@ -82,6 +81,7 @@ This is only used to ensure thread-safety, not for synchronization, which is don
 
 The processor threads share the same precomputed factors, which depending on the task are either transform factors at multiple offsets for encoding, or transform factors plus derivative factors and the error locator polynomial for decoding.
 
+\pagebreak
 \section{Benchmarks}
 
 Several kinds of benchmarks were implemented to measure the performance of various aspects of the implementation - finite field arithmetic, polynomial oversampling and recovery, and the full encoding and decoding process including disk I/O.
