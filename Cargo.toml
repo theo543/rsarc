@@ -10,7 +10,7 @@ categories = ["command-line-utilities"]
 keywords = ["reed-solomon", "erasure", "ecc"]
 exclude = [
     "*.pdf",
-    "report/*",
+    "thesis/*",
     ".vscode/*",
 ]
 

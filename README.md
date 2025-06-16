@@ -2,6 +2,8 @@
 
 Implementation of Reed-Solomon erasure coding for file corruption detection and repair using $O(n \log n)$ algorithms introduced in the paper [Novel Polynomial Basis and Its Application to Reed-Solomon Erasure Codes](https://arxiv.org/pdf/1404.3458).
 
+Project for [undergraduate thesis](/thesis/thesis.pdf) at University of Bucharest, Faculty of Mathematics and Computer Science.
+
 ## Commands
 
 - `test`: Runs an end-to-end test of the program.
