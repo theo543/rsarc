@@ -36,11 +36,11 @@ Finite fields, also known as Galois fields, are mathematical structures which de
 A field must satisfy the following properties:
 
 \begin{itemize}[nosep]
-    \item Associativity of addition and multiplication: $(a + b) + c = a + (b + c)$ and $(a \cdot b) \cdot c = a \cdot (b \cdot c)$
-    \item Commutativity of addition and multiplication: $a + b = b + a$ and $a \cdot b = b \cdot a$
-    \item Additive and multiplicative identity elements: $a + 0 = a$ and $a \cdot 1 = a$
-    \item Additive inverses: for every $a$, there exists $-a$ such that $a + (-a) = 0$
-    \item Multiplicative inverses: for every $a \neq 0$, there exists $a^{-1}$ such that $a \cdot a^{-1} = 1$
+    \item Associativity: $(a + b) + c = a + (b + c)$ and $(a \cdot b) \cdot c = a \cdot (b \cdot c)$
+    \item Commutativity: $a + b = b + a$ and $a \cdot b = b \cdot a$
+    \item Identity elements: $a + 0 = a$ and $a \cdot 1 = a$
+    \item Additive inverse: for every $a$, there exists $-a$ such that $a + (-a) = 0$
+    \item Multiplicative inverse: for every $a \neq 0$, there exists $a^{-1}$ such that $a \cdot a^{-1} = 1$
     \item Distributivity of multiplication over addition: $a \cdot (b + c) = a \cdot b + a \cdot c$
 \end{itemize}
 
@@ -113,7 +113,7 @@ A simple way to compute the multiplicative inverse is to raise the element to th
 This was used in the early stages of this project, however it requires $126$ multiplications.
 It is still used in a unit test to check the results given by the more complex algorithm.
 
-The extended Euclidean algorithm is an extension to the well-known Euclidean algorithm for computing GCD, which also computes coefficients of Bezout's identity, a linear combination of the inputs that equals the GCD:
+The extended Euclidean algorithm \cite{extended-euclid} is an extension to the well-known Euclidean algorithm for computing GCD, which also computes coefficients of Bezout's identity, a linear combination of the inputs that equals the GCD:
 
 \begin{equation}
 ax + by = \gcd(a, b) \label{eq:bezout}
