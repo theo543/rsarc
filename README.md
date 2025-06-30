@@ -11,3 +11,9 @@ Project for [undergraduate thesis](/thesis/thesis.pdf) at University of Buchares
 - `verify <input file> <parity file>`: Check for corruption in the input and parity files.
 - `repair <input file> <parity file>`: Attempt to find and repair corruption in the input and parity files, if there is enough parity data and the metadata is not corrupt.
 - `reassemble <input file> <parity file> <reassembled input file> <reassembled parity file>`: Reassemble the input and parity files after an insertion/deletion error (very unlikely to happen).
+
+#### License
+
+<sup>
+Licensed under either the <a href="./LICENSE-APACHE">Apache License 2.0</a> or the <a href="./LICENSE-MIT">MIT license</a> at your option.
+</sup>
