@@ -1,14 +1,18 @@
+import sys
 import matplotlib
 from matplotlib import pyplot as plt
 import pandas as pd
 
-matplotlib.use("pgf")
-matplotlib.rcParams.update({
-    "pgf.texsystem": "pdflatex",
-    'font.family': 'serif',
-    'text.usetex': True,
-    'pgf.rcfonts': False,
-})
+pgf = 'png' not in sys.argv
+
+if pgf:
+    matplotlib.use("pgf")
+    matplotlib.rcParams.update({
+        "pgf.texsystem": "pdflatex",
+        'font.family': 'serif',
+        'text.usetex': True,
+        'pgf.rcfonts': False,
+    })
 
 df = pd.read_csv("benchmark_poly.csv", header=None, names=['name', 'size', 'time'])
 
@@ -30,9 +34,13 @@ for i, name in enumerate(['oversample', 'precompute_oversampling', 'recover', 'p
 plt.yscale('log', base=2)
 plt.xscale('log', base=2)
 plt.grid()
-plt.xlabel('symbols')
-plt.ylabel('time (ns)')
+if pgf:
+    plt.xlabel('symbols')
+    plt.ylabel('time (ns)')
 plt.xticks([2**i for i in range(8, 18)])
 plt.yticks([2**i for i in range(11, 35, 2)])
 plt.legend(loc='upper right', fontsize='small')
-plt.savefig('benchmarks_log_poly.pgf', bbox_inches='tight')
+if pgf:
+    plt.savefig('benchmarks_log_poly.pgf', bbox_inches='tight')
+else:
+    plt.savefig('../presentation/benchmarks_log_poly.png', bbox_inches='tight', dpi=300, transparent=True)
